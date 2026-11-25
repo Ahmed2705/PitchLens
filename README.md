@@ -24,7 +24,7 @@ PitchLens is a solo university project for AI-powered football tracking and matc
 
 ## Development status
 
-The object detection baseline has been trained and evaluated on held-out broadcast frames, and the detector has been tested on CPU and CUDA. Several provisional accuracy targets remain unmet, and video-level verification is pending because no footage was available. See the [progress tracker](docs/PROGRESS.md) and [detection results](docs/DETECTION.md) before using the model.
+The object detection baseline has been trained and evaluated on held-out broadcast frames, tested on CPU and CUDA, and checked on one unlabelled video. Several provisional accuracy targets remain unmet; broader video verification remains outstanding. See the [progress tracker](docs/PROGRESS.md) and [detection results](docs/DETECTION.md) before using the model.
 
 ## Preliminary technology stack
 

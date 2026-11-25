@@ -1,6 +1,12 @@
 # Development progress
 
-PitchLens has completed the object detection baseline and frame-level verification. Architectural review and video-level verification remain outstanding.
+PitchLens has completed the object detection baseline and an initial video check. Architectural review and broader video verification remain outstanding.
+
+## Initial video check
+
+- Processed the supplied Inter–Ajax U19 WebM with the existing checkpoint, CUDA, 960-pixel input and confidence 0.25. The 1280 × 720 source and generated MP4 each decoded to 390 frames at 24 FPS; source metadata reported 391 frames. Processing took 13.89 seconds (28.08 FPS including decoding, inference, drawing and encoding). The MP4 has no audio track.
+- The detector produced ball detections in 91 frames. This is not ball recall: the video has no ground-truth annotations. Representative frames showed generally plausible player boxes, some overlapping or missed detections, a small ball, and substantial spectator occlusion near the end. No tracking or temporal identity checks were performed.
+- The 248 images excluded from the final processed dataset comprise 244 held-out augmented images, two exact-duplicate images, and two previously inspected test frames. These categories are disjoint in the final preparation report.
 
 ## Delegated development workflow
 
