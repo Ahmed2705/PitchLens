@@ -62,6 +62,7 @@ Optional future features are tracked separately in [PROGRESS.md](PROGRESS.md#opt
 - A closer review discovered that the first split placed footage from the same stadium across splits. The first baseline was stopped after 11 epochs; its checkpoints are preserved but will not be used for the final model. The revised final test excludes stadium groups previously used for validation, and the new baseline starts from the original pretrained weights.
 - Two frames in the revised test group were inadvertently used to smoke-test an earlier checkpoint. Exclude those preselected frame IDs from final scoring; no model or threshold was selected from their predictions. The final dataset's training and validation images and labels were verified byte-for-byte identical to those used by the running baseline.
 - Earlier manifests hashed LF-normalized label text while Windows wrote CRLF files. Version 4 explicitly writes the existing CRLF label bytes and hashes those exact bytes; the final training and validation payloads remain byte-identical to the running baseline.
+- The model was trained at 640 pixels. Before final test evaluation, 640, 960 and 1280 pixel inference were compared on validation. The 960-pixel setting was selected for the detector default because it achieved the best overall validation metrics while improving ball recall and maintaining the provisional speed target. Use a 0.25 global confidence threshold for the documented final test.
 
 ## Preliminary recommendations
 

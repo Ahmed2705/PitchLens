@@ -1,12 +1,12 @@
 # Development progress
 
-PitchLens has completed foundational setup and is beginning the authorized object detection feature.
+PitchLens has completed the object detection baseline and frame-level verification. Architectural review and video-level verification remain outstanding.
 
 ## Delegated development workflow
 
 - The project owner authorized autonomous execution of the complete detection feature, including compatible free dependencies, dataset preparation, local training, testing, documentation, and verified milestone commits and pushes.
 - Work stays within the approved scope, $0 budget and 1 GB total dataset download limit. External data paths remain configurable; raw datasets, model weights and generated experiments remain outside Git.
-- Detection is not yet complete or verified. Stop at the detection feature boundary for architectural review before beginning tracking.
+- The detection baseline is implemented and evaluated on frames, with material accuracy and dataset limitations documented below. Stop at the detection feature boundary for architectural review before beginning tracking.
 
 ## Completed setup
 
@@ -66,19 +66,20 @@ The two manually downloaded YOLO26 exports in Windows Downloads total 136,835,95
 - Revised training class counts are 22,871 player, 829 goalkeeper, 2,606 referee and 965 ball boxes. Of 272 original ball boxes, 270 are under 8 pixels wide and high when scaled to a 640-pixel input. The final test set contains 25 correlated frames from one stadium, including five goalkeeper and 21 ball boxes; this sharply limits generalization claims.
 - Two independent preparations of the final version produced identical manifests and reports. SHA-256 checks verified every retained source image, processed image and saved label. Earlier manifests recorded LF-normalized label hashes rather than the Windows file bytes; version 4 corrects that checksum issue. Dataset details and commands are documented in [DETECTION.md](DETECTION.md).
 
-## Detection training and evaluation — in progress
+## Detection training and evaluation — baseline verified on frames
 
 - Official pretrained `yolo26s.pt` downloaded locally; SHA-256 `646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b`. It is excluded from Git.
 - A fresh one-epoch CUDA smoke test on 57 training images and 44 validation images from the revised split completed with finite losses and metrics, AMP enabled, automatic batch size 12, and peak PyTorch allocated GPU memory of 3,520,646,656 bytes. The smoke results are not model performance claims.
-- The first 640-pixel baseline was stopped after 11 epochs when the split leakage risk was discovered. Its artifacts are preserved but ineligible for final evaluation. The new baseline on the revised split has started from the original pretrained weights. Final training, final evaluation, detector and inference verification are not yet complete.
-- A modular frame detector and evaluation utility have been implemented. Contract tests passed, CPU inference on an early checkpoint returned valid original-frame coordinates, and a GPU evaluation smoke test ran on validation frames. These checks do not establish final-model accuracy or video performance.
-- The running baseline uses `detection-v2`; the final scoring dataset is `detection-v4`, which excludes only the two previously inspected test frames and corrects the label hashes. All training and validation images and labels were compared byte-for-byte across versions and matched. No final model or threshold was selected based on the two inspected predictions.
+- The first 640-pixel baseline was stopped after 11 epochs when the split leakage risk was discovered. Its artifacts are preserved but ineligible for final evaluation. The revised baseline started from the original pretrained weights, trained for 81 epochs and stopped with patience 20; epoch 61 was the best validation checkpoint. Auto-batch selected 12, and the auto optimizer selected AdamW. Peak PyTorch training allocation was 3,703,108,096 bytes and peak reserved memory was 4,227,858,432 bytes.
+- Validation comparisons selected 960-pixel inference before the final test. On the 25-image held-out test, fixed-threshold macro precision was 83.63%, recall 69.94%, mAP50 81.24% and mAP50–95 55.61%. Per-class AP50 was player 98.64%, goalkeeper 61.36%, referee 90.11% and ball 74.87%. Ball recall was 13/21 at 0.25 confidence, with three false ball detections. Twenty-one of 54 referee boxes were classified as players.
+- The 960-pixel GPU benchmark measured 54.06 FPS over 50 repetitions of a validation frame, excluding file I/O and video decoding. CPU and CUDA inference on a 1920 × 1080 validation frame both returned 26 detections with valid original-frame coordinates; empty results and invalid input handling were verified. All 16 automated tests passed. These checks do not establish video performance.
+- The baseline used `detection-v2`; the final scoring dataset was `detection-v4`, which excludes only the two previously inspected test frames and corrects the label hashes. All training and validation images and labels were compared byte-for-byte across versions and matched. No final model or threshold was selected based on the two inspected predictions.
 - Two repeated one-epoch smoke runs on the same earlier dataset produced identical logged metrics apart from elapsed time; this verifies the local smoke workflow, not bitwise equivalence across hardware or library versions.
+- Aggregate precision, recall, mAP50 and mAP50–95 and goalkeeper AP50 did not meet their provisional targets. The final test covers one stadium and five goalkeeper boxes; underlying broadcast rights were not independently verified. No video footage was available for video-level verification.
 
 ## Pending setup and release work
 
 - Additional dependency selection.
-- Automatic CPU fallback implementation and testing.
 - Fresh-clone setup testing.
 - Final integration and testing.
 - Installation and usage documentation.
@@ -86,7 +87,7 @@ The two manually downloaded YOLO26 exports in Windows Downloads total 136,835,95
 
 ## Pending core features
 
-1. Player, goalkeeper, referee and ball detection
+1. Player, goalkeeper, referee and ball detection — baseline implemented and frame-tested; architectural review and video verification outstanding
 2. Player and ball tracking
 3. Automatic team classification
 4. Camera calibration and 2D pitch mapping

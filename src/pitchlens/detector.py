@@ -35,7 +35,7 @@ class Detector:
 
     def __init__(self, weights: str | Path, *, confidence: float = .25, iou: float = .7,
                  class_confidence: Mapping[int, float] | None = None,
-                 image_size: int = 640, device: str = "auto") -> None:
+                 image_size: int = 960, device: str = "auto") -> None:
         path = Path(weights).expanduser()
         if not path.is_file():
             raise FileNotFoundError(f"Detector weights not found: {path}")

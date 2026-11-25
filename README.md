@@ -24,7 +24,7 @@ PitchLens is a solo university project for AI-powered football tracking and matc
 
 ## Development status
 
-PitchLens is implementing the authorized object detection feature. Dataset preparation, conservative stadium-aware splitting and a GPU training smoke test have been verified; the revised baseline is training. Final training, evaluation and detector verification remain pending. See the [progress tracker](docs/PROGRESS.md) for current status.
+The object detection baseline has been trained and evaluated on held-out broadcast frames, and the detector has been tested on CPU and CUDA. Several provisional accuracy targets remain unmet, and video-level verification is pending because no footage was available. See the [progress tracker](docs/PROGRESS.md) and [detection results](docs/DETECTION.md) before using the model.
 
 ## Preliminary technology stack
 
@@ -48,7 +48,7 @@ Select exactly one PyTorch installation option for your hardware.
 python -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128
 ```
 
-**CPU-only.** Use this option for a CPU installation. CPU execution is an approved project requirement. Automatic device fallback is still pending.
+**CPU-only.** Use this option for a CPU installation. The frame detector automatically falls back to CPU when CUDA is unavailable.
 
 ```powershell
 python -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cpu

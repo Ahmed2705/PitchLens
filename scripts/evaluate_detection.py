@@ -94,7 +94,7 @@ def main() -> None:
     parser.add_argument("--weights", type=Path, required=True)
     parser.add_argument("--run", type=Path, required=True, help="New directory for evaluation artifacts")
     parser.add_argument("--split", choices=("val", "test"), default="val")
-    parser.add_argument("--image-size", type=int, default=640)
+    parser.add_argument("--image-size", type=int, default=960)
     parser.add_argument("--confidence", type=float, default=.25, help="Fixed operating threshold for confusion counts")
     parser.add_argument("--benchmark-frames", type=int, default=50)
     args = parser.parse_args()

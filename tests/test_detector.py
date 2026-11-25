@@ -35,6 +35,7 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(detector.detect(frame), [])
         self.model_factory.assert_called_once()
         self.assertEqual(self.backend.predict.call_count, 2)
+        self.assertEqual(self.backend.predict.call_args.kwargs["imgsz"], 960)
 
     @patch("pitchlens.detector.torch.cuda.is_available", return_value=True)
     def test_gpu_selection_and_original_frame_coordinates(self, _cuda):
