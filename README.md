@@ -28,7 +28,45 @@ PitchLens is in the foundational setup stage. The initial source layout and proj
 
 ## Preliminary technology stack
 
-Candidates subject to approval include Python, YOLO, ByteTrack, OpenCV, PyTorch, scikit-learn, K-means, NumPy, pandas, mplsoccer, and Streamlit. The stack, model selections, and dependency versions remain open.
+Python 3.13, PyTorch 2.11.0, and TorchVision 0.26.0 are approved. Candidates still subject to approval include YOLO, ByteTrack, OpenCV, scikit-learn, K-means, NumPy, pandas, mplsoccer, and Streamlit. Model selections and further dependency versions remain open.
+
+## Preliminary environment setup
+
+These instructions are preliminary until independently tested. PitchLens requires Python `>=3.13,<3.14`, and the development version is 3.13.7. From the repository root in Windows PowerShell, check that `python` points to a supported interpreter, then create and activate the environment.
+
+```powershell
+python --version
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Select exactly one PyTorch installation option for your hardware.
+
+**NVIDIA GPU with CUDA 12.8.** This option requires compatible NVIDIA hardware and drivers. The PyTorch wheels provide the CUDA runtime dependencies, so a standalone CUDA Toolkit is currently unnecessary.
+
+```powershell
+python -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128
+```
+
+**CPU-only.** Use this option for a CPU installation. CPU execution is an approved project requirement. Automatic device fallback is still pending.
+
+```powershell
+python -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cpu
+```
+
+After installing the CPU or CUDA builds, install the project requirements and install PitchLens in editable mode.
+
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install -e .
+```
+
+Verify that Python can locate the package and that the environment's dependencies are consistent.
+
+```powershell
+python -c "import pitchlens; print(pitchlens.__file__)"
+python -m pip check
+```
 
 ## Repository layout
 

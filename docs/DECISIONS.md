@@ -31,14 +31,22 @@ Optional future features are tracked separately in [PROGRESS.md](PROGRESS.md#opt
 
 ## Approved Python environment
 
-- Python 3.13.7 is the approved development version.
+- Python 3.13.7 is the approved development version. The supported range is `>=3.13,<3.14`.
 - Use `venv` to manage the virtual environment and `pip` to manage packages.
 - The virtual environment lives in `.venv/` at the repository root. The `.venv/` rule in `.gitignore` excludes it from Git.
 
+## Approved packaging and dependency management
+
+- Use Setuptools to package `pitchlens` from `src/pitchlens/`. The initial version is `0.1.0`, and development uses editable installation.
+- Add direct dependencies incrementally as the developer approves them and they are tested. Keep the runtime pins consistent across `pyproject.toml` and `requirements.txt`. The developer manages package installation manually through the VS Code terminal.
+- Pin PyTorch to `2.11.0` and TorchVision to `0.26.0` using public versions. The local environment uses the CUDA 12.8 (`cu128`) builds. The README documents separate installation commands for CUDA and CPU wheels.
+- Use an NVIDIA GPU as the primary computation device where supported. CPU execution support is required. The current CUDA wheel setup requires a compatible NVIDIA driver, with no separate CUDA Toolkit or cuDNN installation required.
+- Keep storage locations for large machine learning assets configurable so developers can use external storage.
+
 ## Preliminary recommendations
 
-The candidates are YOLO, ByteTrack, OpenCV, PyTorch, scikit-learn, K-means, NumPy, pandas, mplsoccer, and Streamlit. This list is subject to developer approval and does not establish dependencies.
+The candidates are YOLO, ByteTrack, OpenCV, scikit-learn, K-means, NumPy, pandas, mplsoccer, and Streamlit. This list is subject to developer approval and does not establish dependencies.
 
 ## Open decisions
 
-Package configuration, dependency management, model selection, dependency versions, and feature implementation details remain open.
+The license, additional dependencies and their versions, model selection, and feature implementation details remain open.

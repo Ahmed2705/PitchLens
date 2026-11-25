@@ -1,0 +1,5 @@
+# Install the appropriate CPU or CUDA builds first using the hardware-specific
+# instructions in README.md, then use this file for the remaining project setup.
+# Direct dependencies only. Add entries as they are approved and tested.
+torch==2.11.0
+torchvision==0.26.0

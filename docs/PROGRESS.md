@@ -18,9 +18,25 @@ PitchLens is in its foundational setup stage.
   - `pip --version` reported pip 25.2 from `.venv/`.
   - `git check-ignore` matched the `.venv/` rule, and `git ls-files` found no tracked files under `.venv/`.
 
+## Completed and verified hardware and dependency setup
+
+- Hardware assessment completed. PyTorch recognized the NVIDIA RTX 2060 SUPER and reported CUDA availability.
+- External storage preparation and installation cache and temporary storage configuration completed and verified.
+- PyTorch `2.11.0+cu128` and TorchVision `0.26.0+cu128` installed and verified in `.venv/`.
+- PyTorch matrix multiplication was verified on both the CPU and the NVIDIA GPU using CUDA.
+
+## Completed and verified package setup
+
+- Package configuration reviewed and approved.
+- PitchLens `0.1.0` installed successfully in editable mode.
+- Python successfully imported `pitchlens` from `src/pitchlens/`.
+- `python -m pip check` reported no broken requirements in `.venv/`.
+
 ## Pending setup and release work
 
-- Dependency management and package configuration.
+- Additional dependency selection.
+- Automatic CPU fallback implementation and testing.
+- Fresh-clone setup testing.
 - Final integration and testing.
 - Installation and usage documentation.
 - Final portability and reproducibility testing.

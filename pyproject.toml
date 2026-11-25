@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=75.3.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pitchlens"
+version = "0.1.0"
+description = "AI-powered football tracking and match analysis from match footage."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pitchlens", "pitchlens.*"]
+namespaces = false
