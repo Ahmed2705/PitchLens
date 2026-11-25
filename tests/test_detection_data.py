@@ -113,6 +113,12 @@ class SplitTests(unittest.TestCase):
             label_bytes = (output / "train" / "labels" / "def.txt").read_bytes()
             self.assertEqual(hashlib.sha256(label_bytes).hexdigest(), entry["label_sha256"])
             self.assertIn(b"\r\n", label_bytes)
+            with patch("pitchlens.detection_data.scan_sources", return_value=(records, {})), \
+                 patch("pitchlens.detection_data.group_sources", return_value=(groups, {})), \
+                 patch("pitchlens.detection_data.choose_split", return_value={"aaaaaa": "train", "bbbbbb": "test"}):
+                other = prepare(raw, root / "other-output", config, seed=43)
+            self.assertEqual(other["splits"]["train"]["images"], 1)
+            self.assertEqual(other["excluded_previously_inspected_test_frames"], [])
 
 
 if __name__ == "__main__":

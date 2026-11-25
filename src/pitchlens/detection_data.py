@@ -255,10 +255,11 @@ def prepare(raw_root: Path, output: Path, config: dict, seed: int = 42) -> dict:
     groups, similarity = group_sources(records, config)
     assignments = choose_split(records, groups, seed, tuple(config.get("test_excluded_source_prefixes", ())))
     excluded_test_frames = set(config.get("test_excluded_frame_ids", ()))
+    available_originals = {r.frame_id for r in records if r.original}
+    if not excluded_test_frames <= available_originals:
+        raise ValueError("An explicitly excluded frame is absent from the original dataset")
     found_test_frames = {r.frame_id for r in records if r.original and r.frame_id in excluded_test_frames
                          and assignments[groups.find(r.source_prefix)] == "test"}
-    if found_test_frames != excluded_test_frames:
-        raise ValueError("An explicitly excluded test frame was not found in the assigned test group")
     report.update(similarity)
     report["seed"] = seed
     report["groups"] = {prefix: {"group": groups.find(prefix), "split": assignments[groups.find(prefix)]}
@@ -268,7 +269,7 @@ def prepare(raw_root: Path, output: Path, config: dict, seed: int = 42) -> dict:
                         for s in ("train", "val", "test")}
     report["excluded_heldout_augmentations"] = 0
     report["excluded_exact_duplicates"] = 0
-    report["excluded_previously_inspected_test_frames"] = sorted(excluded_test_frames)
+    report["excluded_previously_inspected_test_frames"] = sorted(found_test_frames)
     output.mkdir(parents=True)
     seen = set()
     manifest = []
