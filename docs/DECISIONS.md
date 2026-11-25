@@ -76,3 +76,11 @@ The project license and implementation details outside the authorized detection 
 
 - Feature #02 is authorized through implementation and verification; stop before team classification. Keep the accepted detector checkpoint and 960-pixel inference. Use the pinned Ultralytics ByteTrack separately for each person class, with time-based lost-track buffers. Use a separate confidence and motion-gated single-ball tracker with explicitly marked extrapolations and cut resets. The free `lap==0.5.12` package supplies ByteTrack's assignment solver.
 - Track identifiers are scoped by video, camera segment and class. Camera-cut detection is a heuristic; tracking parameters and source FPS are documented in [TRACKING.md](TRACKING.md). These outputs are estimates and do not establish tracking accuracy without ground truth.
+
+## Feature #03 decision: segment-local team classification
+
+Use torso LAB color and deterministic two-means on bounded, smoothed per-track samples. Team IDs are segment-local and may change at camera cuts. Leave uncertain fits unknown. Goalkeepers remain unknown; the developer deferred their team assignment until Feature #04. No training or new dataset is used.
+
+## Assisted team initialization
+
+When a user supplies labeled player-crop examples for both teams, use an offline local SigLIP vision model and per-track embedding aggregation. The examples define team labels for that video; the automatic LAB mode remains separately available because automatic cluster numbers cannot be safely mapped to user-defined team labels without evidence. Low-similarity and low-margin predictions remain unknown. Goalkeeper affiliation is deferred. This is a baseline subject to tracking errors and uncalibrated confidence thresholds.

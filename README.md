@@ -84,4 +84,4 @@ python -m pip check
 
 ## Development approach
 
-The current delegated task covers player and ball tracking through verification; stop before team classification. See [tracking usage and limitations](docs/TRACKING.md). The project prioritizes accuracy, reliability, and reproducibility, including documented dataset splits and experiment settings. Decisions are recorded in the [technical decision record](docs/DECISIONS.md), and the detection data workflow is in [DETECTION.md](docs/DETECTION.md).
+The current delegated task includes experimental automatic team classification; camera calibration is not implemented. See [tracking usage and limitations](docs/TRACKING.md). The project prioritizes accuracy, reliability, and reproducibility, including documented dataset splits and experiment settings. Decisions are recorded in the [technical decision record](docs/DECISIONS.md), and the detection data workflow is in [DETECTION.md](docs/DETECTION.md).

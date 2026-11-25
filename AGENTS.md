@@ -30,7 +30,7 @@ Optional future features
 - Intelligent pass recommendation.
 - Jersey number recognition.
 
-Implement optional features only after the core features have been completed, integrated and tested and the developer has explicitly approved the optional feature and authorized its implementation. Work only within the currently authorized feature scope. The object detection baseline and Feature #02 player and ball tracking are authorized. Stop before team classification or another subsequent feature.
+Implement optional features only after the core features have been completed, integrated and tested and the developer has explicitly approved the optional feature and authorized its implementation. Work only within the currently authorized feature scope. The object detection baseline, Feature #02 tracking, and Feature #03 team classification are authorized. Goalkeeper team assignment is deferred until Feature #04. Stop before Feature #04 or another subsequent feature.
 
 ## 3. Development Roles
 

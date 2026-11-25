@@ -17,6 +17,9 @@ dependencies = [
     "lap==0.5.12",
 ]
 
+[project.optional-dependencies]
+assisted = ["transformers==5.24.1"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["pitchlens", "pitchlens.*"]
