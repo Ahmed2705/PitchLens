@@ -55,7 +55,7 @@ Ultralytics identifies its installed package license as AGPL-3.0. The PitchLens 
 
 ## Frame detector and evaluation
 
-The detector loads its weights once, selects CUDA when available and otherwise falls back to CPU. It accepts a nonempty OpenCV BGR `uint8` frame and returns `Detection` objects with `(left, top, right, bottom)` pixel coordinates in the original frame, class IDs, and confidence. Thresholds, input resolution and device are configurable. Missing weights, incompatible class mappings and invalid frames are rejected.
+The detector loads its weights once, selects CUDA when available and otherwise falls back to CPU. It accepts a nonempty OpenCV BGR `uint8` frame and returns `Detection` objects with `(left, top, right, bottom)` pixel coordinates in the original frame, class IDs, and confidence. The global confidence threshold, optional per-class confidence thresholds, input resolution and device are configurable. The IoU setting is passed through for models that use non-maximum suppression; the standard end-to-end YOLO26s head is NMS-free, so that setting does not affect its predictions. Missing weights, incompatible class mappings and invalid frames are rejected.
 
 ```python
 import cv2

@@ -72,6 +72,23 @@ class DetectorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Detector(self.weights)
 
+    @patch("pitchlens.detector.torch.cuda.is_available", return_value=False)
+    def test_class_specific_confidence_keeps_ball_and_filters_player(self, _cuda):
+        class Boxes:
+            xyxy = torch.tensor([[1., 1., 10., 10.], [20., 20., 30., 30.]])
+            cls = torch.tensor([3., 0.])
+            conf = torch.tensor([.2, .2])
+            def __len__(self):
+                return 2
+        self.backend.predict.return_value = [SimpleNamespace(boxes=Boxes())]
+        detector = Detector(self.weights, confidence=.25, class_confidence={3: .1})
+        result = detector.detect(np.zeros((40, 40, 3), dtype=np.uint8))
+        self.assertEqual([item.class_id for item in result], [3])
+        self.assertEqual(self.backend.predict.call_args.kwargs["conf"], .1)
+        for invalid in ({4: .1}, {3: -1}, {True: .2}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                Detector(self.weights, class_confidence=invalid)
+
 
 if __name__ == "__main__":
     unittest.main()
