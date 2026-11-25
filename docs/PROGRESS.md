@@ -13,13 +13,13 @@ PitchLens is in its foundational setup stage.
 - Project folder structure designed and approved.
 - Initial project structure and foundational documentation created, reviewed, and verified.
 
-## Implemented, pending verification
-
-- Initial project structure and foundational documentation are in place. Developer and reviewer verification is pending.
+- Python environment setup completed and verified.
+  - The `.venv/` interpreter reported Python 3.13.7 and confirmed it was running inside the virtual environment.
+  - `pip --version` reported pip 25.2 from `.venv/`.
+  - `git check-ignore` matched the `.venv/` rule, and `git ls-files` found no tracked files under `.venv/`.
 
 ## Pending setup and release work
 
-- Python environment setup.
 - Dependency management and package configuration.
 - Final integration and testing.
 - Installation and usage documentation.

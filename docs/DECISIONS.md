@@ -29,10 +29,16 @@ Optional future features are tracked separately in [PROGRESS.md](PROGRESS.md#opt
 - The Python source package uses the `src/pitchlens/` layout. Feature-specific modules and subdirectories are added incrementally as their implementations are authorized.
 - The repository uses the approved `.gitignore` strategy to exclude local environments and caches, credentials, large dataset payloads and match footage, model weights, and generated outputs. Dataset and model documentation and configuration can be tracked outside ignored payload folders.
 
+## Approved Python environment
+
+- Python 3.13.7 is the approved development version.
+- Use `venv` to manage the virtual environment and `pip` to manage packages.
+- The virtual environment lives in `.venv/` at the repository root. The `.venv/` rule in `.gitignore` excludes it from Git.
+
 ## Preliminary recommendations
 
-The candidates are Python, YOLO, ByteTrack, OpenCV, PyTorch, scikit-learn, K-means, NumPy, pandas, mplsoccer, and Streamlit. This list is subject to developer approval and does not establish dependencies.
+The candidates are YOLO, ByteTrack, OpenCV, PyTorch, scikit-learn, K-means, NumPy, pandas, mplsoccer, and Streamlit. This list is subject to developer approval and does not establish dependencies.
 
 ## Open decisions
 
-Python environment setup, package configuration, dependency management, model selection, dependency versions, and feature implementation details remain open.
+Package configuration, dependency management, model selection, dependency versions, and feature implementation details remain open.
