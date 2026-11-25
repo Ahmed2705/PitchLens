@@ -1,0 +1,20 @@
+{
+  "datasets": {
+    "football-players-detection-v10": {
+      "classes": ["ball", "goalkeeper", "player", "referee"],
+      "original": true
+    },
+    "football-object-detection-v1": {
+      "classes": ["ball", "corner", "goal", "goalkeeper", "player", "referee"],
+      "original": false
+    }
+  },
+  "class_names": ["player", "goalkeeper", "referee", "ball"],
+  "exclude_classes": ["goal", "corner"],
+  "conservative_source_groups": [
+    ["4b770a", "798b45"],
+    ["744b27", "c01561"],
+    ["538438", "cd987c"]
+  ],
+  "phash_distance": 6
+}

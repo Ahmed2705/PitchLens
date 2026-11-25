@@ -24,11 +24,11 @@ PitchLens is a solo university project for AI-powered football tracking and matc
 
 ## Development status
 
-PitchLens is in the foundational setup stage. The initial source layout and project documentation are in place. The football analytics features have not yet been implemented. See the [progress tracker](docs/PROGRESS.md) for upcoming work.
+PitchLens is implementing the authorized object detection feature. Dataset preparation and leakage-aware splitting have been verified; model training, evaluation and the detector are still pending. See the [progress tracker](docs/PROGRESS.md) for current status.
 
 ## Preliminary technology stack
 
-Python 3.13, PyTorch 2.11.0, and TorchVision 0.26.0 are approved. Candidates still subject to approval include YOLO, ByteTrack, OpenCV, scikit-learn, K-means, NumPy, pandas, mplsoccer, and Streamlit. Model selections and further dependency versions remain open.
+Python 3.13, PyTorch 2.11.0, TorchVision 0.26.0, Ultralytics YOLO26s, NumPy and OpenCV are used for the authorized detection work. Other proposed features and technologies remain outside the current implementation task.
 
 ## Preliminary environment setup
 
@@ -84,4 +84,4 @@ python -m pip check
 
 ## Development approach
 
-Each feature will be authorized, implemented, and verified incrementally. The project will prioritize accuracy, reliability, and reproducibility, including documented dataset splits and experiment settings when applicable. Approved architectural decisions are recorded in the [technical decision record](docs/DECISIONS.md).
+The current delegated task covers detection through verification, followed by architectural review before tracking. The project prioritizes accuracy, reliability, and reproducibility, including documented dataset splits and experiment settings. Decisions are recorded in the [technical decision record](docs/DECISIONS.md), and the detection data workflow is in [DETECTION.md](docs/DETECTION.md).
