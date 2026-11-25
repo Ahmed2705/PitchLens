@@ -29,3 +29,20 @@ In PowerShell, from the project root, change the paths to suit the local machine
 ```
 
 The output contains YOLO image and label folders, `data.yaml`, a per-image `manifest.json` with source IDs and SHA-256 hashes, and `report.json` with grouping, class counts and audit results. Neither the raw data nor the processed data should be committed. Use a new output directory for each preparation instead of overwriting an earlier one.
+
+## Train the baseline
+
+The approved baseline uses the official pretrained `yolo26s.pt`, 640-pixel input, CUDA, AMP, automatic batch size and optimizer, seed 42, a 100-epoch maximum and early stopping after 20 unimproved epochs. [The configuration](../configs/detection_train.json) uses modest color, translation, scale, horizontal-flip and mosaic augmentations. Vertical flips, rotation, mixup and perspective changes are disabled. A smoke run uses 5% of training images for one epoch and never uses the test split.
+
+Download the official weights separately to an ignored local location and supply the paths explicitly. Runs must use a new directory; existing experiments are never overwritten.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\train_detection.py `
+  --data data\processed\detection-v1\data.yaml `
+  --weights models\yolo26s.pt --run runs\detection-smoke --smoke
+.\.venv\Scripts\python.exe scripts\train_detection.py `
+  --data data\processed\detection-v1\data.yaml `
+  --weights models\yolo26s.pt --run runs\detection-baseline-640
+```
+
+Each run records input and manifest hashes, requested settings, GPU details, Ultralytics' resolved arguments, losses and validation metrics, per-epoch peak PyTorch GPU memory, and checkpoints. `best.pt` is selected on validation, never on test data. The figures depend on hardware and library versions; deterministic settings do not guarantee bit-for-bit equivalence across platforms.

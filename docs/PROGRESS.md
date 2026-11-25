@@ -66,10 +66,11 @@ The two manually downloaded YOLO26 exports in Windows Downloads total 136,835,95
 - Training class counts are 24,033 player, 806 goalkeeper, 2,738 referee and 1,008 ball boxes. Of 272 original ball boxes, 270 are under 8 pixels wide and high when scaled to a 640-pixel input. The small, correlated held-out sets and uncertain match provenance limit generalization claims.
 - Two independent preparations produced identical manifests and reports. Seven automated preparation tests passed. Dataset details and commands are documented in [DETECTION.md](DETECTION.md).
 
-## Detection training and evaluation — pending
+## Detection training and evaluation — in progress
 
 - Official pretrained `yolo26s.pt` downloaded locally; SHA-256 `646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b`. It is excluded from Git.
-- The smoke test, baseline training, final evaluation, detector and inference verification are not yet complete.
+- A one-epoch CUDA smoke test on 60 training images and 31 validation images completed with finite losses and metrics, AMP enabled, automatic batch size 12, and peak PyTorch allocated GPU memory of 3,518,951,424 bytes. The smoke results are not model performance claims.
+- The 640-pixel baseline has started with a maximum of 100 epochs and patience 20. Final training, final evaluation, detector and inference verification are not yet complete.
 
 ## Pending setup and release work
 

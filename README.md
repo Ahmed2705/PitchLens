@@ -24,7 +24,7 @@ PitchLens is a solo university project for AI-powered football tracking and matc
 
 ## Development status
 
-PitchLens is implementing the authorized object detection feature. Dataset preparation and leakage-aware splitting have been verified; model training, evaluation and the detector are still pending. See the [progress tracker](docs/PROGRESS.md) for current status.
+PitchLens is implementing the authorized object detection feature. Dataset preparation, leakage-aware splitting and a GPU training smoke test have been verified; baseline training is in progress. Evaluation and the detector are still pending. See the [progress tracker](docs/PROGRESS.md) for current status.
 
 ## Preliminary technology stack
 
