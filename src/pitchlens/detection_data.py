@@ -289,7 +289,10 @@ def prepare(raw_root: Path, output: Path, config: dict, seed: int = 42) -> dict:
         dest = f"{record.sha256}.jpg"
         shutil.copyfile(record.path, image_dir / dest)
         label_text = "".join(f"{c} {x:.8f} {y:.8f} {w:.8f} {h:.8f}\n" for c, x, y, w, h in record.labels)
-        (label_dir / f"{record.sha256}.txt").write_text(label_text, encoding="utf-8")
+        # Use explicit CRLF bytes to match previously prepared Windows labels
+        # while making the saved-byte checksum portable and unambiguous.
+        label_bytes = label_text.replace("\n", "\r\n").encode("utf-8")
+        (label_dir / f"{record.sha256}.txt").write_bytes(label_bytes)
         stats = report["splits"][split]
         stats["images"] += 1
         stats["original_images"] += int(record.original)
@@ -300,8 +303,8 @@ def prepare(raw_root: Path, output: Path, config: dict, seed: int = 42) -> dict:
         manifest.append({"source": record.relative_path, "frame_id": record.frame_id, "sha256": record.sha256,
                          "phash": f"{record.phash:016x}", "group": groups.find(record.source_prefix),
                          "split": split, "original": record.original, "output": f"{split}/images/{dest}",
-                         "label_sha256": hashlib.sha256(label_text.encode()).hexdigest()})
-    (output / "data.yaml").write_text("train: train/images\nval: val/images\ntest: test/images\nnames: [player, goalkeeper, referee, ball]\n", encoding="utf-8")
-    (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+                         "label_sha256": hashlib.sha256(label_bytes).hexdigest()})
+    (output / "data.yaml").write_text("train: train/images\nval: val/images\ntest: test/images\nnames: [player, goalkeeper, referee, ball]\n", encoding="utf-8", newline="\n")
+    (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
+    (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8", newline="\n")
     return report

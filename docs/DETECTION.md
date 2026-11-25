@@ -7,6 +7,8 @@ The detection feature is under development. The prepared dataset and weights are
 - [Football Players Detection v10](https://universe.roboflow.com/roboflow-jvuqo/football-players-detection-3zvbc/dataset/10), Roboflow Universe, CC BY 4.0 as stated in the supplied export: 312 original 1920 × 1080 frames.
 - [Football Object Detection v1](https://universe.roboflow.com/football-detect/football-object-detection/dataset/1), Roboflow Universe, CC BY 4.0 as stated in the supplied export: 1,150 640 × 640 images with provider-generated crop variants. All 242 distinct frame identifiers in this export also occur in v10.
 
+The license statements above are from the dataset exports; rights to the underlying broadcast footage have not been independently verified.
+
 Both export class mappings are verified against their metadata. The output mapping is `0: player`, `1: goalkeeper`, `2: referee`, `3: ball`. Goal polygons and corner boxes are removed. Images and boxes are validated, with sub-pixel edge overflows clipped only within a one-pixel tolerance. Conflicting labels on byte-identical images stop preparation.
 
 ## Split and limitations
@@ -17,7 +19,9 @@ With seed 42, held-out groups are selected using original-frame counts and class
 
 An earlier prefix-only split placed the same stadium in multiple splits. Its baseline was stopped after 11 epochs and is not used for the final model. Stadium groups from that run's validation set are explicitly ineligible for the revised test split; the revised baseline starts again from the official pretrained weights.
 
-Two preselected frames from the revised test group were accidentally used for an early checkpoint's detector smoke check. They are explicitly excluded from the final test dataset. No model or threshold was selected from those predictions. The baseline uses `detection-v2`; `detection-v3` excludes those two frames, and all training and validation images and labels were verified byte-for-byte identical across the versions.
+Two preselected frames from the revised test group were accidentally used for an early checkpoint's detector smoke check. They are explicitly excluded from the final test dataset. No model or threshold was selected from those predictions. The baseline uses `detection-v2`; `detection-v4` excludes those two frames, and all training and validation images and labels were verified byte-for-byte identical across the versions.
+
+Earlier dataset manifests hashed LF-normalized label text, while Windows wrote CRLF files, so their label checksums do not match the saved bytes. Version 4 writes explicit CRLF labels and records the SHA-256 of those bytes. All retained raw images, processed images and label hashes were verified against the final manifest.
 
 The sample of annotated training images reviewed was generally plausible, but this is not a complete annotation-quality audit. At 640 input size, 270 of 272 original ball boxes are smaller than 8 × 8 pixels after aspect-preserving resize; this and class imbalance make ball detection difficult.
 
@@ -28,7 +32,7 @@ In PowerShell, from the project root, change the paths to suit the local machine
 ```powershell
 .\.venv\Scripts\python.exe scripts\prepare_detection_dataset.py `
   --raw E:\PitchLensStorage\datasets\raw `
-  --output data\processed\detection-v3
+  --output data\processed\detection-v4
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -42,10 +46,10 @@ Download the official weights separately to an ignored local location and supply
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\train_detection.py `
-  --data data\processed\detection-v3\data.yaml `
+  --data data\processed\detection-v4\data.yaml `
   --weights models\yolo26s.pt --run runs\detection-smoke --smoke
 .\.venv\Scripts\python.exe scripts\train_detection.py `
-  --data data\processed\detection-v3\data.yaml `
+  --data data\processed\detection-v4\data.yaml `
   --weights models\yolo26s.pt --run runs\detection-baseline-640
 ```
 
@@ -71,7 +75,7 @@ After the baseline has finished, select the checkpoint and the operating thresho
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\evaluate_detection.py `
-  --data data\processed\detection-v3\data.yaml `
+  --data data\processed\detection-v4\data.yaml `
   --weights runs\detection-baseline-640\weights\best.pt `
   --run runs\detection-final-test --split test --confidence 0.25
 ```

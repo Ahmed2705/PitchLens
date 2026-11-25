@@ -1,5 +1,7 @@
 """Tests for detection annotation validation and leakage-aware splitting."""
 
+import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -106,6 +108,11 @@ class SplitTests(unittest.TestCase):
             self.assertEqual(report["splits"]["test"]["images"], 0)
             self.assertEqual(report["splits"]["train"]["images"], 1)
             self.assertEqual(report["excluded_previously_inspected_test_frames"], ["frame-1"])
+            output = root / "output"
+            entry = json.loads((output / "manifest.json").read_text(encoding="utf-8"))[0]
+            label_bytes = (output / "train" / "labels" / "def.txt").read_bytes()
+            self.assertEqual(hashlib.sha256(label_bytes).hexdigest(), entry["label_sha256"])
+            self.assertIn(b"\r\n", label_bytes)
 
 
 if __name__ == "__main__":
