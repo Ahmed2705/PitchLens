@@ -49,6 +49,13 @@ class EvaluationTests(unittest.TestCase):
             self.assertEqual(tuple(targets["bboxes"].shape), (0, 4))
             self.assertEqual(tuple(targets["cls"].shape), (0,))
 
+    def test_cross_class_confusion_counts_as_false_positive_and_false_negative(self):
+        matrix = [[0] * 5 for _ in range(5)]
+        matrix[3][0] = 1  # a player was predicted as a ball
+        scores = fixed_threshold_scores(matrix)
+        self.assertEqual(scores["ball"]["false_positive"], 1)
+        self.assertEqual(scores["player"]["false_negative"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
