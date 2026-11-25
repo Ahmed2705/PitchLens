@@ -1,0 +1,147 @@
+# Python bytecode, packaging and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+/build/
+/dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+.venv/
+venv/
+
+# Testing, linting and notebook caches
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.dmypy.json
+.pyright/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Local logs and temporary files
+*.log
+*.tmp
+*.temp
+/logs/*
+/tmp/*
+
+# Dataset payloads
+# Keep dataset documentation, metadata and configs beside these payload folders.
+# These rules also cover versioned datasets nested under data/ or datasets/.
+/data/**/raw/*
+/data/**/processed/*
+/data/**/images/*
+/data/**/labels/*
+/data/**/annotations/*
+/data/**/train/*
+/data/**/val/*
+/data/**/valid/*
+/data/**/validation/*
+/data/**/test/*
+/datasets/**/raw/*
+/datasets/**/processed/*
+/datasets/**/images/*
+/datasets/**/labels/*
+/datasets/**/annotations/*
+/datasets/**/train/*
+/datasets/**/val/*
+/datasets/**/valid/*
+/datasets/**/validation/*
+/datasets/**/test/*
+
+# Dataset archives
+/data/**/*.zip
+/data/**/*.tar
+/data/**/*.tar.*
+/data/**/*.tgz
+/data/**/*.gz
+/data/**/*.7z
+/data/**/*.rar
+/datasets/**/*.zip
+/datasets/**/*.tar
+/datasets/**/*.tar.*
+/datasets/**/*.tgz
+/datasets/**/*.gz
+/datasets/**/*.7z
+/datasets/**/*.rar
+
+# Match footage and exported videos
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.m4v
+*.mpg
+*.mpeg
+*.wmv
+*.mts
+*.m2ts
+
+# Model weights, checkpoints and training runs
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.safetensors
+/checkpoints/*
+/models/**/checkpoints/*
+/runs/*
+
+# Generated predictions, results and visualizations
+/outputs/*
+/predictions/*
+/results/*
+
+# Placeholders at the top level of ignored payload and output folders
+!.gitkeep
+
+# Environment files, credentials and keys
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+!.env.*.sample
+!.env.*.template
+/secrets/
+credentials.json
+service-account-key.json
+*.key
+*.pem
+*.p12
+*.pfx
+*.ppk
+id_rsa
+id_ed25519
+id_ecdsa
+id_dsa
+
+# Windows and macOS metadata
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+._*
+.Spotlight-V100/
+.Trashes/
+
+# Editor settings and swap or backup files
+.vscode/
+.idea/
+.vs/
+*.code-workspace
+*.suo
+*.swp
+*.swo
+*~
+~$*
