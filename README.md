@@ -28,7 +28,7 @@ The object detection baseline has been trained and evaluated on held-out broadca
 
 ## Preliminary technology stack
 
-Python 3.13, PyTorch 2.11.0, TorchVision 0.26.0, Ultralytics YOLO26s, NumPy and OpenCV are used for the authorized detection work. Other proposed features and technologies remain outside the current implementation task.
+Python 3.13, PyTorch 2.11.0, TorchVision 0.26.0, Ultralytics YOLO26s, NumPy and OpenCV are used for the authorized detection work. Tracking uses ByteTrack and the LAP assignment solver. Other subsequent features remain outside the current implementation task.
 
 ## Preliminary environment setup
 
@@ -84,4 +84,4 @@ python -m pip check
 
 ## Development approach
 
-The current delegated task covers detection through verification, followed by architectural review before tracking. The project prioritizes accuracy, reliability, and reproducibility, including documented dataset splits and experiment settings. Decisions are recorded in the [technical decision record](docs/DECISIONS.md), and the detection data workflow is in [DETECTION.md](docs/DETECTION.md).
+The current delegated task covers player and ball tracking through verification; stop before team classification. See [tracking usage and limitations](docs/TRACKING.md). The project prioritizes accuracy, reliability, and reproducibility, including documented dataset splits and experiment settings. Decisions are recorded in the [technical decision record](docs/DECISIONS.md), and the detection data workflow is in [DETECTION.md](docs/DETECTION.md).

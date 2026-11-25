@@ -30,7 +30,7 @@ Optional future features
 - Intelligent pass recommendation.
 - Jersey number recognition.
 
-Implement optional features only after the core features have been completed, integrated and tested and the developer has explicitly approved the optional feature and authorized its implementation. Work only within the currently authorized feature scope. The complete object detection feature is currently authorized; stop for architectural review before beginning object tracking.
+Implement optional features only after the core features have been completed, integrated and tested and the developer has explicitly approved the optional feature and authorized its implementation. Work only within the currently authorized feature scope. The object detection baseline and Feature #02 player and ball tracking are authorized. Stop before team classification or another subsequent feature.
 
 ## 3. Development Roles
 
@@ -150,3 +150,7 @@ At the end of each implementation task, report the following.
 6. Whether the acceptance criteria were satisfied.
 
 Be transparent about incomplete work and uncertainty.
+
+## 15. Independent review
+
+- Before pushing implementation work, invoke the supported Codex review mechanism using the configured GPT-6.2 Sol review model when requested. Verify the model actually used, address valid findings and rerun relevant tests. Report any review that could not be completed rather than claiming it occurred.

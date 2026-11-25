@@ -1,6 +1,6 @@
 # Development progress
 
-PitchLens has completed the object detection baseline and an initial video check. Architectural review and broader video verification remain outstanding.
+PitchLens has an accepted object detection baseline and a tracking implementation tested on two unlabelled videos. Ground-truth tracking evaluation remains outstanding.
 
 ## Initial video check
 
@@ -12,7 +12,7 @@ PitchLens has completed the object detection baseline and an initial video check
 
 - The project owner authorized autonomous execution of the complete detection feature, including compatible free dependencies, dataset preparation, local training, testing, documentation, and verified milestone commits and pushes.
 - Work stays within the approved scope, $0 budget and 1 GB total dataset download limit. External data paths remain configurable; raw datasets, model weights and generated experiments remain outside Git.
-- The detection baseline is implemented and evaluated on frames, with material accuracy and dataset limitations documented below. Stop at the detection feature boundary for architectural review before beginning tracking.
+- The detection baseline is implemented and evaluated on frames, with material accuracy and dataset limitations documented below. Tracking was subsequently authorized; stop before team classification.
 
 ## Completed setup
 
@@ -94,7 +94,7 @@ The two manually downloaded YOLO26 exports in Windows Downloads total 136,835,95
 ## Pending core features
 
 1. Player, goalkeeper, referee and ball detection — baseline implemented and frame-tested; architectural review and video verification outstanding
-2. Player and ball tracking
+2. Player and ball tracking ? implemented and behavior-tested; annotated ground-truth evaluation outstanding
 3. Automatic team classification
 4. Camera calibration and 2D pitch mapping
 5. Player speed and distance covered
@@ -114,3 +114,11 @@ The two manually downloaded YOLO26 exports in Windows Downloads total 136,835,95
 - Jersey number recognition
 
 Optional features require completion, integration, and testing of the core scope, followed by explicit feature approval and separate implementation authorization.
+
+## Feature #02: tracking verification
+
+- Implemented ByteTrack for person classes, a separate single-ball predictor, cut resets, structured JSONL output and annotated video generation. The tracker uses the accepted checkpoint at 960 pixels and no retraining. Details and limitations are in [TRACKING.md](TRACKING.md).
+- The two supplied unlabelled videos processed on CUDA: U19, 390 frames at 27.32 processing FPS; desktop capture, 928 frames at 21.41 processing FPS. The videos and JSONL records each decoded or contained the same number of frames. A three-frame CPU smoke run completed. Timings include decoding, inference, tracking, drawing and encoding, including startup effects; they are not controlled benchmarks. The outputs contain no audio.
+- Synthetic automated checks exercise ID continuity, a missing detection, lower confidence, competing ball candidates, bounded predictions, camera cuts and invalid inputs. No ground truth exists for these videos, so tracking accuracy and real-world ID switch counts are not measured. Visual and annotated evaluation across more matches remains necessary.
+
+- The requested Codex independent review reported GPT-6.2 Sol and identified seven valid issues: output reservation, low-confidence confirmation, ball reacquisition and velocity reset, initialization order, odd-sized output and box clipping. These were addressed; the video workflow rejects odd dimensions. Spot checks of the unlabelled U19 output showed apparent ID churn in crowded play, which remains a quality limitation.

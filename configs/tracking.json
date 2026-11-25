@@ -1,0 +1,12 @@
+{
+  "person_low": 0.1,
+  "person_high": 0.25,
+  "person_new": 0.25,
+  "person_match": 0.8,
+  "person_buffer_seconds": 1.0,
+  "ball_confidence": 0.25,
+  "ball_gap_seconds": 0.25,
+  "ball_gate_fraction": 0.08,
+  "cut_threshold": 0.32,
+  "trajectory_seconds": 1.0
+}

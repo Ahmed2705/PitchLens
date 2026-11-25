@@ -53,7 +53,7 @@ Optional future features are tracked separately in [PROGRESS.md](PROGRESS.md#opt
 
 ## Delegated object detection implementation
 
-- The complete object detection feature is authorized through dataset preparation, leakage-aware splitting, training, evaluation, module implementation and verification. Continue between its routine stages without manual approval; stop before object tracking for architectural review.
+- The complete object detection feature is authorized through dataset preparation, leakage-aware splitting, training, evaluation, module implementation and verification. This authorization has since been extended to Feature #02 tracking.
 - Use local computation, a $0 project budget, a total dataset download limit of 1 GB, and the RTX 2060 SUPER with 8 GB VRAM as the primary hardware. Keep external storage paths configurable and never commit datasets, weights or generated experiments.
 - Prepare the approved exports with the mapping `0: player`, `1: goalkeeper`, `2: referee`, `3: ball`, removing goal and corner annotations. Preserve the raw exports. Target a reproducible 80/10/10 split while keeping known related frames and augmentations together and documenting provenance limits.
 - Train YOLO26s initialized from free pretrained `yolo26s.pt` at 640 pixels, with CUDA, AMP, automatic batch sizing and optimizer selection, at most 100 epochs, patience 20, and seed 42. Run a smoke test first; consider 960 or 1280 only when justified and feasible.
@@ -70,4 +70,9 @@ The candidates are YOLO, ByteTrack, OpenCV, scikit-learn, K-means, NumPy, pandas
 
 ## Open decisions
 
-The project license and implementation details outside the authorized detection scope remain open.
+The project license and implementation details outside the authorized detection and tracking scope remain open.
+
+## Authorized tracking implementation
+
+- Feature #02 is authorized through implementation and verification; stop before team classification. Keep the accepted detector checkpoint and 960-pixel inference. Use the pinned Ultralytics ByteTrack separately for each person class, with time-based lost-track buffers. Use a separate confidence and motion-gated single-ball tracker with explicitly marked extrapolations and cut resets. The free `lap==0.5.12` package supplies ByteTrack's assignment solver.
+- Track identifiers are scoped by video, camera segment and class. Camera-cut detection is a heuristic; tracking parameters and source FPS are documented in [TRACKING.md](TRACKING.md). These outputs are estimates and do not establish tracking accuracy without ground truth.
