@@ -203,7 +203,8 @@ def group_sources(records: list[Record], config: dict) -> tuple[Groups, dict]:
                     "cross_prefix_near_duplicate_pairs": cross_prefix}
 
 
-def choose_split(records: list[Record], groups: Groups, seed: int) -> dict[str, str]:
+def choose_split(records: list[Record], groups: Groups, seed: int,
+                 test_excluded_prefixes: tuple[str, ...] = ()) -> dict[str, str]:
     """Select disjoint held-out source groups targeting 10% of original frames each.
 
     We use annotation totals only to improve class representation, before any
@@ -219,7 +220,7 @@ def choose_split(records: list[Record], groups: Groups, seed: int) -> dict[str, 
                  for group in source_groups}
     target = len(originals) * .1
     options = []
-    for size in range(2, len(source_groups) - 1):
+    for size in range(1, len(source_groups) - 1):
         for subset in itertools.combinations(source_groups, size):
             count = sum(sizes[group] for group in subset)
             if not target * .5 <= count <= target * 1.5:
@@ -231,9 +232,12 @@ def choose_split(records: list[Record], groups: Groups, seed: int) -> dict[str, 
             class_error = sum(abs(box_counts[c] - totals[c] * .1) / max(totals[c] * .1, 1) for c in range(4)) / 4
             options.append((frozenset(subset), size_error + .35 * class_error))
     random.Random(seed).shuffle(options)
-    candidates = ((a_score + b_score, a, b) for i, (a, a_score) in enumerate(options)
-                  for b, b_score in options[i + 1:] if not a & b)
-    best = min(candidates, key=lambda item: item[0], default=None)
+    excluded_groups = {groups.find(prefix) for prefix in test_excluded_prefixes}
+    candidates = ((a_score + b_score, a, b) for a, a_score in options
+                  for b, b_score in options if not a & b and not b & excluded_groups)
+    # Prefer more diverse held-out sets when the small number of source groups
+    # allows it; then minimize image-count and class-representation errors.
+    best = min(candidates, key=lambda item: (-(int(len(item[1]) > 1) + int(len(item[2]) > 1)), item[0]), default=None)
     if best is None:
         raise ValueError("Could not construct disjoint, class-representative held-out source groups")
     _, validation, test = best
@@ -249,7 +253,7 @@ def prepare(raw_root: Path, output: Path, config: dict, seed: int = 42) -> dict:
         raise FileExistsError(f"Refusing to overwrite existing output: {output}")
     records, report = scan_sources(raw_root, config)
     groups, similarity = group_sources(records, config)
-    assignments = choose_split(records, groups, seed)
+    assignments = choose_split(records, groups, seed, tuple(config.get("test_excluded_source_prefixes", ())))
     report.update(similarity)
     report["seed"] = seed
     report["groups"] = {prefix: {"group": groups.find(prefix), "split": assignments[groups.find(prefix)]}

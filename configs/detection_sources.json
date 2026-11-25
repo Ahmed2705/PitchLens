@@ -12,9 +12,12 @@
   "class_names": ["player", "goalkeeper", "referee", "ball"],
   "exclude_classes": ["goal", "corner"],
   "conservative_source_groups": [
-    ["4b770a", "798b45"],
+    ["2e57b9", "42ba34", "54745b", "573e61"],
+    ["40cd38", "55c9d1"],
+    ["4b770a", "798b45", "538438", "cd987c"],
     ["744b27", "c01561"],
-    ["538438", "cd987c"]
+    ["121364", "a9f16c"]
   ],
+  "test_excluded_source_prefixes": ["2e57b9", "55c9d1"],
   "phash_distance": 6
 }

@@ -58,19 +58,19 @@ The two manually downloaded YOLO26 exports in Windows Downloads total 136,835,95
 - Image SHA-256 checks found three exact duplicate groups in v1. All were within individual splits. No exact image matches were found between splits or between exports.
 - Extraction is complete in `football-players-detection-v10` and `football-object-detection-v1` under `E:\PitchLensStorage\datasets\raw`. SHA-256 comparisons matched all 2,930 extracted files to their ZIP entries and reconfirmed both original ZIPs in Downloads. Recounts matched the original split, image resolution, and annotation totals. The external folders are outside any Git worktree, and Git ignored all corresponding paths under the repository's `data/raw/`.
 
-## Detection dataset preparation and splitting — verified
+## Detection dataset preparation and splitting — revised and verified
 
-- Prepared both exports without modifying raw data. The v1 export contains variants of 242 v10 frames, rather than independent frames. Fifteen source prefixes were reduced to 12 conservative groups after a visual review and perceptual-hash investigation; the exact original matches are not identified in the exports.
+- Prepared both exports without modifying raw data. The v1 export contains variants of 242 v10 frames, rather than independent frames. A closer visual review found shared stadiums across the first split. The revised grouping conservatively joins the 15 source prefixes into six visually identified stadium groups; the exact original matches are not identified in the exports.
 - Audited 1,462 input images and annotations. Removed 961 corner boxes and 506 goal polygons, clipped one sub-pixel edge overflow, found three exact duplicate groups and no duplicate annotation lines. Two duplicate images were removed from training and the remaining duplicate was among excluded held-out augmentations.
-- Split the 312 original frames into 251 training, 31 validation and 30 test images. The training set also contains augmented copies, for 1,203 total training images; validation and test contain original images only. Excluded 196 held-out augmentations. Each split contains all four classes, and no known source group, frame ID or exact image hash crosses splits.
-- Training class counts are 24,033 player, 806 goalkeeper, 2,738 referee and 1,008 ball boxes. Of 272 original ball boxes, 270 are under 8 pixels wide and high when scaled to a 640-pixel input. The small, correlated held-out sets and uncertain match provenance limit generalization claims.
-- Two independent preparations produced identical manifests and reports. Seven automated preparation tests passed. Dataset details and commands are documented in [DETECTION.md](DETECTION.md).
+- The revised split has 241 training, 44 validation and 27 test original frames (77.2% / 14.1% / 8.7%). Training also contains augmented copies, for 1,145 total training images; validation and test contain original images only. Excluded 244 held-out augmentations. Each split contains all four classes, and no known stadium group, frame ID or exact image hash crosses splits.
+- Revised training class counts are 22,871 player, 829 goalkeeper, 2,606 referee and 965 ball boxes. Of 272 original ball boxes, 270 are under 8 pixels wide and high when scaled to a 640-pixel input. The test set contains 27 correlated frames from one stadium, including seven goalkeeper and 23 ball boxes; this sharply limits generalization claims.
+- Two independent preparations of the revised split produced identical manifests and reports. Dataset details and commands are documented in [DETECTION.md](DETECTION.md).
 
 ## Detection training and evaluation — in progress
 
 - Official pretrained `yolo26s.pt` downloaded locally; SHA-256 `646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b`. It is excluded from Git.
-- A one-epoch CUDA smoke test on 60 training images and 31 validation images completed with finite losses and metrics, AMP enabled, automatic batch size 12, and peak PyTorch allocated GPU memory of 3,518,951,424 bytes. The smoke results are not model performance claims.
-- The 640-pixel baseline has started with a maximum of 100 epochs and patience 20. Final training, final evaluation, detector and inference verification are not yet complete.
+- A fresh one-epoch CUDA smoke test on 57 training images and 44 validation images from the revised split completed with finite losses and metrics, AMP enabled, automatic batch size 12, and peak PyTorch allocated GPU memory of 3,520,646,656 bytes. The smoke results are not model performance claims.
+- The first 640-pixel baseline was stopped after 11 epochs when the split leakage risk was discovered. Its artifacts are preserved but ineligible for final evaluation. The new baseline on the revised split has started from the original pretrained weights. Final training, final evaluation, detector and inference verification are not yet complete.
 
 ## Pending setup and release work
 

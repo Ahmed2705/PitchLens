@@ -55,6 +55,9 @@ class SplitTests(unittest.TestCase):
         self.assertEqual(split, choose_split(records, groups, 42))
         self.assertEqual({name: list(split.values()).count(name) for name in ("train", "val", "test")},
                          {"train": 16, "val": 2, "test": 2})
+        excluded = tuple(list(sorted(split))[:4])
+        reassigned = choose_split(records, groups, 42, excluded)
+        self.assertTrue(all(reassigned[prefix] != "test" for prefix in excluded))
 
     def test_similarity_merges_cross_source_candidates(self):
         a = record("aaaaaa", 1, "one", 0)
