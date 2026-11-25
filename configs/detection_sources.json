@@ -19,5 +19,6 @@
     ["121364", "a9f16c"]
   ],
   "test_excluded_source_prefixes": ["2e57b9", "55c9d1"],
+  "test_excluded_frame_ids": ["08fd33_0_10", "08fd33_0_1"],
   "phash_distance": 6
 }

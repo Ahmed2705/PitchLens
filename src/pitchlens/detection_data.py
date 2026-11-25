@@ -254,6 +254,11 @@ def prepare(raw_root: Path, output: Path, config: dict, seed: int = 42) -> dict:
     records, report = scan_sources(raw_root, config)
     groups, similarity = group_sources(records, config)
     assignments = choose_split(records, groups, seed, tuple(config.get("test_excluded_source_prefixes", ())))
+    excluded_test_frames = set(config.get("test_excluded_frame_ids", ()))
+    found_test_frames = {r.frame_id for r in records if r.original and r.frame_id in excluded_test_frames
+                         and assignments[groups.find(r.source_prefix)] == "test"}
+    if found_test_frames != excluded_test_frames:
+        raise ValueError("An explicitly excluded test frame was not found in the assigned test group")
     report.update(similarity)
     report["seed"] = seed
     report["groups"] = {prefix: {"group": groups.find(prefix), "split": assignments[groups.find(prefix)]}
@@ -263,6 +268,7 @@ def prepare(raw_root: Path, output: Path, config: dict, seed: int = 42) -> dict:
                         for s in ("train", "val", "test")}
     report["excluded_heldout_augmentations"] = 0
     report["excluded_exact_duplicates"] = 0
+    report["excluded_previously_inspected_test_frames"] = sorted(excluded_test_frames)
     output.mkdir(parents=True)
     seen = set()
     manifest = []
@@ -270,6 +276,8 @@ def prepare(raw_root: Path, output: Path, config: dict, seed: int = 42) -> dict:
         split = assignments[groups.find(record.source_prefix)]
         if split != "train" and not record.original:
             report["excluded_heldout_augmentations"] += 1
+            continue
+        if split == "test" and record.frame_id in excluded_test_frames:
             continue
         if record.sha256 in seen:
             report["excluded_exact_duplicates"] += 1

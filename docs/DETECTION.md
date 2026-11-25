@@ -13,9 +13,11 @@ Both export class mappings are verified against their metadata. The output mappi
 
 SHA-256 identifies exact duplicates; a 64-bit DCT perceptual hash flags similar images. The filename prefix groups related sequences and crops across both exports. A visual stadium review prompted conservative grouping of the 15 prefixes into six stadium groups in [the source configuration](../configs/detection_sources.json); cross-prefix perceptual-hash candidates are grouped as well. Stadium grouping is a precaution, not proof of original match identity; the source does not provide authoritative match IDs, so residual leakage remains possible.
 
-With seed 42, held-out groups are selected using original-frame counts and class representation. Stadium grouping takes priority over the 80/10/10 target: the revised original-frame split is 241/44/27 (77.2% / 14.1% / 8.7%). Training has 1,145 images after adding variants and removing two duplicates; validation and test use only originals. The third exact duplicate is among excluded held-out augmentations. Validation covers two stadium groups, while test covers only one and has seven goalkeeper boxes. Adjacent images may be highly correlated, so these sets provide only a limited estimate of performance on new matches.
+With seed 42, held-out groups are selected using original-frame counts and class representation. Stadium grouping takes priority over the 80/10/10 target: the original-frame split assigned 241/44/27. Two previously inspected test-group frames are excluded from final scoring, leaving 241/44/25. Training has 1,145 images after adding variants and removing two duplicates; validation and test use only originals. The third exact duplicate is among excluded held-out augmentations. Validation covers two stadium groups, while test covers only one and has five goalkeeper boxes. Adjacent images may be highly correlated, so these sets provide only a limited estimate of performance on new matches.
 
 An earlier prefix-only split placed the same stadium in multiple splits. Its baseline was stopped after 11 epochs and is not used for the final model. Stadium groups from that run's validation set are explicitly ineligible for the revised test split; the revised baseline starts again from the official pretrained weights.
+
+Two preselected frames from the revised test group were accidentally used for an early checkpoint's detector smoke check. They are explicitly excluded from the final test dataset. No model or threshold was selected from those predictions. The baseline uses `detection-v2`; `detection-v3` excludes those two frames, and all training and validation images and labels were verified byte-for-byte identical across the versions.
 
 The sample of annotated training images reviewed was generally plausible, but this is not a complete annotation-quality audit. At 640 input size, 270 of 272 original ball boxes are smaller than 8 × 8 pixels after aspect-preserving resize; this and class imbalance make ball detection difficult.
 
@@ -26,7 +28,7 @@ In PowerShell, from the project root, change the paths to suit the local machine
 ```powershell
 .\.venv\Scripts\python.exe scripts\prepare_detection_dataset.py `
   --raw E:\PitchLensStorage\datasets\raw `
-  --output data\processed\detection-v2
+  --output data\processed\detection-v3
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -40,10 +42,10 @@ Download the official weights separately to an ignored local location and supply
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\train_detection.py `
-  --data data\processed\detection-v2\data.yaml `
+  --data data\processed\detection-v3\data.yaml `
   --weights models\yolo26s.pt --run runs\detection-smoke --smoke
 .\.venv\Scripts\python.exe scripts\train_detection.py `
-  --data data\processed\detection-v2\data.yaml `
+  --data data\processed\detection-v3\data.yaml `
   --weights models\yolo26s.pt --run runs\detection-baseline-640
 ```
 
@@ -69,7 +71,7 @@ After the baseline has finished, select the checkpoint and the operating thresho
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\evaluate_detection.py `
-  --data data\processed\detection-v2\data.yaml `
+  --data data\processed\detection-v3\data.yaml `
   --weights runs\detection-baseline-640\weights\best.pt `
   --run runs\detection-final-test --split test --confidence 0.25
 ```

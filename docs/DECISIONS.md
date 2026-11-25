@@ -60,6 +60,7 @@ Optional future features are tracked separately in [PROGRESS.md](PROGRESS.md#opt
 - Treat the supplied performance targets as provisional. Never tune with the held-out test set; report measured results and limitations.
 - The v1 export's 242 distinct source-frame identifiers all occur in the 312-image v10 export. Group all copies by source prefix across both exports; merge visually identified stadiums conservatively and merge cross-prefix perceptual-hash candidates. Use only original v10 images for validation and test. Select held-out groups using original-frame and class counts before training, favoring held-out group diversity when feasible. The target split applies to unique original frames; augmented images are training-only.
 - A closer review discovered that the first split placed footage from the same stadium across splits. The first baseline was stopped after 11 epochs; its checkpoints are preserved but will not be used for the final model. The revised final test excludes stadium groups previously used for validation, and the new baseline starts from the original pretrained weights.
+- Two frames in the revised test group were inadvertently used to smoke-test an earlier checkpoint. Exclude those preselected frame IDs from final scoring; no model or threshold was selected from their predictions. The final dataset's training and validation images and labels were verified byte-for-byte identical to those used by the running baseline.
 
 ## Preliminary recommendations
 

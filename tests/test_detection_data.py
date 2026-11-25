@@ -3,6 +3,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pitchlens.detection_data import Groups, Record, choose_split, group_sources, prepare, read_labels
 
@@ -83,6 +84,28 @@ class SplitTests(unittest.TestCase):
                 prepare(raw, raw / "processed", {})
             with self.assertRaises(FileExistsError):
                 prepare(raw, existing, {})
+
+    def test_previously_inspected_test_frames_are_excluded(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            raw = root / "raw"
+            raw.mkdir()
+            image = raw / "sample.jpg"
+            image.write_bytes(b"sample")
+            records = [Record(image, "sample.jpg", "source", "aaaaaa", "frame-1", True,
+                              "abc", 0, 100, 100, ((0, .5, .5, .1, .1),)),
+                       Record(image, "sample.jpg", "source", "bbbbbb", "frame-2", True,
+                              "def", 0, 100, 100, ((0, .5, .5, .1, .1),))]
+            groups = Groups({"aaaaaa", "bbbbbb"})
+            config = {"class_names": ["player", "goalkeeper", "referee", "ball"],
+                      "test_excluded_frame_ids": ["frame-1"]}
+            with patch("pitchlens.detection_data.scan_sources", return_value=(records, {})), \
+                 patch("pitchlens.detection_data.group_sources", return_value=(groups, {})), \
+                 patch("pitchlens.detection_data.choose_split", return_value={"aaaaaa": "test", "bbbbbb": "train"}):
+                report = prepare(raw, root / "output", config)
+            self.assertEqual(report["splits"]["test"]["images"], 0)
+            self.assertEqual(report["splits"]["train"]["images"], 1)
+            self.assertEqual(report["excluded_previously_inspected_test_frames"], ["frame-1"])
 
 
 if __name__ == "__main__":
