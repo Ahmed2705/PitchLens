@@ -71,6 +71,7 @@ The two manually downloaded YOLO26 exports in Windows Downloads total 136,835,95
 - Official pretrained `yolo26s.pt` downloaded locally; SHA-256 `646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b`. It is excluded from Git.
 - A fresh one-epoch CUDA smoke test on 57 training images and 44 validation images from the revised split completed with finite losses and metrics, AMP enabled, automatic batch size 12, and peak PyTorch allocated GPU memory of 3,520,646,656 bytes. The smoke results are not model performance claims.
 - The first 640-pixel baseline was stopped after 11 epochs when the split leakage risk was discovered. Its artifacts are preserved but ineligible for final evaluation. The new baseline on the revised split has started from the original pretrained weights. Final training, final evaluation, detector and inference verification are not yet complete.
+- A modular frame detector and evaluation utility have been implemented. Contract tests passed, CPU inference on an early checkpoint returned valid original-frame coordinates, and a GPU evaluation smoke test ran on validation frames. These checks do not establish final-model accuracy or video performance.
 
 ## Pending setup and release work
 

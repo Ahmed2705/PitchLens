@@ -48,3 +48,30 @@ Download the official weights separately to an ignored local location and supply
 ```
 
 Each run records input and manifest hashes, requested settings, GPU details, Ultralytics' resolved arguments, losses and validation metrics, per-epoch peak PyTorch GPU memory, and checkpoints. `best.pt` is selected on validation, never on test data. The figures depend on hardware and library versions; deterministic settings do not guarantee bit-for-bit equivalence across platforms.
+
+Ultralytics identifies its installed package license as AGPL-3.0. The PitchLens project license remains an open decision.
+
+## Frame detector and evaluation
+
+The detector loads its weights once, selects CUDA when available and otherwise falls back to CPU. It accepts a nonempty OpenCV BGR `uint8` frame and returns `Detection` objects with `(left, top, right, bottom)` pixel coordinates in the original frame, class IDs, and confidence. Thresholds, input resolution and device are configurable. Missing weights, incompatible class mappings and invalid frames are rejected.
+
+```python
+import cv2
+from pitchlens.detector import Detector
+
+detector = Detector("runs/detection-baseline-640/weights/best.pt", confidence=0.25)
+frame = cv2.imread("path/to/authorized/frame.jpg")
+for detection in detector.detect(frame):
+    print(detection.class_id, detection.confidence, detection.xyxy)
+```
+
+After the baseline has finished, select the checkpoint and the operating threshold using validation only. The following evaluates a frozen checkpoint with the preselected 0.25 threshold; use a new output directory for each run. Only use `--split test` after model selection is final, and do not use test results to tune the model or threshold.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_detection.py `
+  --data data\processed\detection-v2\data.yaml `
+  --weights runs\detection-baseline-640\weights\best.pt `
+  --run runs\detection-final-test --split test --confidence 0.25
+```
+
+`evaluation.json` records mAP50 and mAP50–95, per-class AP, and precision, recall and confusion counts at the fixed threshold and IoU 0.5. Overall precision and recall are macro averages over classes. Ultralytics' own console output may show precision and recall at its F1-selected confidence; use the fixed-threshold values in `evaluation.json` for the untouched test report. The utility also benchmarks the frame API on a validation frame without file I/O or drawing, records PyTorch peak GPU memory, and saves annotated validation samples. The benchmark excludes video decoding and encoding and is not an end-to-end video throughput claim.
