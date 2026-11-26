@@ -65,19 +65,25 @@ class CameraCutTests(unittest.TestCase):
     def test_pan_with_detail_at_the_edge_preserves_the_shot_in_both_directions(self):
         before = np.full((90, 160, 3), (35, 145, 35), np.uint8)
         before[:16] = 235
-        after = cv2.warpAffine(before, np.array([[1., 0., 0.], [0., 1., 14.]]),
-                               (160, 90), borderMode=cv2.BORDER_REPLICATE)
-        self.assertGreater(cv2.absdiff(before, after).mean() / 255, .055)
-        for a, b in ((before, after), (after, before)):
-            self.assertFalse(is_hard_cut(a, b, **CUT_THRESHOLDS))
+        for dy in (14., 13.25, 13.5, 13.75):
+            with self.subTest(dy=dy):
+                after = cv2.warpAffine(before, np.array([[1., 0., 0.], [0., 1., dy]]),
+                                       (160, 90), borderMode=cv2.BORDER_REPLICATE)
+                self.assertGreater(cv2.absdiff(before, after).mean() / 255, .055)
+                for a, b in ((before, after), (after, before)):
+                    self.assertFalse(is_hard_cut(a, b, **CUT_THRESHOLDS))
 
     def test_lower_third_appearing_and_disappearing_preserves_the_shot(self):
         before = thumbnail(scene(43))
-        after = before.copy()
-        after[72:, 5:-5] = 20
-        self.assertGreater(cv2.absdiff(before, after).mean() / 255, .055)
-        for a, b in ((before, after), (after, before)):
-            self.assertFalse(is_hard_cut(a, b, **CUT_THRESHOLDS))
+        for scorebug in (False, True):
+            with self.subTest(scorebug=scorebug):
+                after = before.copy()
+                after[72:, 5:-5] = 20
+                if scorebug:
+                    after[:9, :16] = 230
+                self.assertGreater(cv2.absdiff(before, after).mean() / 255, .055)
+                for a, b in ((before, after), (after, before)):
+                    self.assertFalse(is_hard_cut(a, b, **CUT_THRESHOLDS))
 
     def test_mowing_stripes_do_not_hide_a_cut_with_different_scene_content(self):
         before = np.full((90, 160, 3), (35, 145, 35), np.uint8)

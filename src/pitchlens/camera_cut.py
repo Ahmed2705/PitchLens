@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import cv2
 import numpy as np
 
@@ -36,8 +38,11 @@ def _localized_change(difference: np.ndarray, gray_before: np.ndarray) -> bool:
     unchanged = difference.reshape(*grid, 3).mean(axis=(1, 3, 4)) <= .02 * 255
     if unchanged.mean() < .75:
         return False
-    rows, columns = np.nonzero(~unchanged)
-    if rows.size == 0 or (np.ptp(rows) + 1) * (np.ptp(columns) + 1) > 30:
+    _, _, regions, _ = cv2.connectedComponentsWithStats((~unchanged).astype(np.uint8), connectivity=8)
+    regions = regions[1:]
+    # A scorebug and a lower third may change together without sharing a box.
+    footprints = regions[:, cv2.CC_STAT_WIDTH] * regions[:, cv2.CC_STAT_HEIGHT]
+    if footprints.sum() > 30:
         return False
     # Repeated mowing stripes are not distinctive two-dimensional features.
     corners = cv2.cornerMinEigenVal(gray_before, blockSize=5)
@@ -75,6 +80,15 @@ def _continuous_motion(before: np.ndarray, after: np.ndarray, gray_before: np.nd
     return _similar_view(aligned[overlap], after[overlap], .65)
 
 
+def _peak_offset(scores: np.ndarray, index: int) -> float:
+    """Refine an interior template-match peak with its two neighbors."""
+    if not 0 < index < len(scores) - 1:
+        return 0.
+    left, center, right = map(float, scores[index-1:index+2])
+    curvature = 2 * center - left - right
+    return .5 * (right - left) / curvature if curvature > 1e-6 else 0.
+
+
 def _continuous_translation(before: np.ndarray, after: np.ndarray, gray_before: np.ndarray,
                             gray_after: np.ndarray, change: float) -> bool:
     # A view of grass and straight field markings may have no trackable corners.
@@ -91,20 +105,22 @@ def _continuous_translation(before: np.ndarray, after: np.ndarray, gray_before: 
         search = gray_after[top:y+template_height+margin_y, left:x+template_width+margin_x]
         correlation = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
         _, _, _, (match_x, match_y) = cv2.minMaxLoc(correlation)
-        dx, dy = left + match_x - x, top + match_y - y
-        tx, ty = max(0, dx), max(0, dy)
-        sx, sy = max(0, -dx), max(0, -dy)
-        w, h = width - abs(dx), height - abs(dy)
-        source_overlap = np.s_[sy:sy+h, sx:sx+w]
-        target_overlap = np.s_[ty:ty+h, tx:tx+w]
-        aligned, current = before[source_overlap], after[target_overlap]
+        dx = left + match_x - x + _peak_offset(correlation[match_y], match_x)
+        dy = top + match_y - y + _peak_offset(correlation[:, match_x], match_y)
+        # Clip to real source pixels before sampling at the fractional shift.
+        tx, ty = max(0, math.ceil(dx)), max(0, math.ceil(dy))
+        right, bottom = min(width, math.floor(width + dx)), min(height, math.floor(height + dy))
+        translation = np.array([[1., 0., dx - tx], [0., 1., dy - ty]])
+        aligned = cv2.warpAffine(before, translation, (right - tx, bottom - ty))
+        current = after[ty:bottom, tx:right]
         difference = cv2.absdiff(aligned, current)
         if difference.mean() / 255 > .55 * change or not _similar_view(aligned, current, .85):
             continue
         # The grass can match even across a cut. Check differing features in
         # either view so a shared field line cannot hide conflicting detail.
-        source_edges = cv2.morphologyEx(gray_before[source_overlap], cv2.MORPH_GRADIENT, None) >= 12
-        target_edges = cv2.morphologyEx(gray_after[target_overlap], cv2.MORPH_GRADIENT, None) >= 12
+        aligned_gray = cv2.cvtColor(aligned, cv2.COLOR_BGR2GRAY)
+        source_edges = cv2.morphologyEx(aligned_gray, cv2.MORPH_GRADIENT, None) >= 12
+        target_edges = cv2.morphologyEx(gray_after[ty:bottom, tx:right], cv2.MORPH_GRADIENT, None) >= 12
         detail = source_edges | target_edges
         mismatch = difference.mean(axis=2) > .10 * 255
         one_sided = source_edges ^ target_edges
