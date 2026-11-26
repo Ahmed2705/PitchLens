@@ -80,13 +80,18 @@ class PitchCalibrationTests(unittest.TestCase):
         self.assertTrue(result.metadata()['valid'], result.reason)
 
     def test_visible_continuation_explains_neighbor_even_when_its_paint_is_partial(self):
-        camera = np.array([[10.5, 0., 100], [0., 0.75, 220], [0., 0., 1.]])
-        frame = self.painted_frame(camera, (540, 960, 3), 'Small rect. left top')
-        # Leave only the 74 px visible stretch of the neighboring penalty-box edge.
-        frame[230, 101:273] = (45, 110, 55)
-        cv2.line(frame, (118, 230), (192, 230), (220, 225, 220), 1)
-        result = self.calibrator.update(self.observe(camera), frame.shape, frame=frame)
-        self.assertTrue(result.metadata()['valid'], result.reason)
+        for x_scale, y_scale, end, painted in ((10.5, 0.75, 273, (118, 192)),
+                                               (30., 1.1, 595, (140, 350))):
+            with self.subTest(x_scale=x_scale, y_scale=y_scale):
+                camera = np.array([[x_scale, 0., 100], [0., y_scale, 220], [0., 0., 1.]])
+                frame = self.painted_frame(camera, (540, 960, 3), 'Small rect. left top')
+                # Retain a continuous part of the neighboring penalty-box edge.
+                row = round(220 + self.world[1, 1] * y_scale)
+                frame[row, 101:end] = (45, 110, 55)
+                cv2.line(frame, (painted[0], row), (painted[1], row), (220, 225, 220), 1)
+                result = self.calibrator.update(self.observe(camera), frame.shape, camera_cut=True,
+                                                frame=frame)
+                self.assertTrue(result.metadata()['valid'], result.reason)
 
     def test_weak_neighbor_cannot_explain_coherently_shifted_paint(self):
         camera = np.array([[7.5, 0., 100], [0., 1., 220], [0., 0., 1.]])

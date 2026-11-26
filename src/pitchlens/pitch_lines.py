@@ -104,16 +104,19 @@ class PitchLineCheck:
             # Samples remain ordered along each projected line.
             return len(selected) >= 2 and np.linalg.norm(selected[-1] - selected[0]) >= 24 * scale
 
-        def continues_past_boundary(distances: np.ndarray) -> bool:
+        def continues_past_boundary(distances: np.ndarray, matches: np.ndarray) -> bool:
             # Positive distances extend out of the shared ridge. Begin on
-            # the ridge and allow small sampling gaps along the same stripe.
-            max_gap = 8 * scale
-            distances = np.sort(distances[distances >= -max_gap])
-            if not len(distances) or distances[0] > 0:
+            # the ridge. Consecutive sampled hits remain connected even when
+            # perspective spreads the projected stations farther apart.
+            order = distances.argsort()
+            stations = np.flatnonzero(matches[order])
+            positions = distances[order[stations]]
+            outside = np.searchsorted(positions, 0., side='right')
+            if outside == 0 or outside == len(positions):
                 return False
-            gaps = np.flatnonzero(np.diff(distances) > max_gap)
-            connected = distances[:gaps[0] + 1] if len(gaps) else distances
-            beyond = connected[connected > 0]
+            stations, positions = stations[outside - 1:], positions[outside - 1:]
+            gaps = np.flatnonzero((np.diff(stations) > 1) & (np.diff(positions) > 8 * scale))
+            beyond = positions[1:gaps[0] + 1] if len(gaps) else positions[1:]
             return len(beyond) >= 4 and beyond[-1] - beyond[0] >= 24 * scale
 
         # An isolated player or logo can create a bright peak. A parallel offset
@@ -148,8 +151,11 @@ class PitchLineCheck:
                     near = near_segments(locations, segment, margin)
                     if not near.any():
                         continue
-                    along = points[(ids == neighbor) & aligned] @ tangent
-                    if continues_past_boundary(lower - along) or continues_past_boundary(along - upper):
+                    neighbor_samples = ids == neighbor
+                    along = points[neighbor_samples] @ tangent
+                    matches_at_neighbor = aligned[neighbor_samples]
+                    if (continues_past_boundary(lower - along, matches_at_neighbor)
+                            or continues_past_boundary(along - upper, matches_at_neighbor)):
                         aliases |= near
                 unexplained = hits[~aliases]
                 if len(unexplained) >= minimum and spans_marking(points[unexplained]):
