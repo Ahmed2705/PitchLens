@@ -1,13 +1,18 @@
 """Regression checks for detection candidate integrity and crop labels."""
 
+import json
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from prepare_detection_candidate import Image, exact_conflicts, verify_group_boundaries
+from prepare_detection_candidate_v2 import verified_boxes, verify_boundaries, verify_export
+from review_candidate_annotations import CLASSES, MANIFEST_SHA256
 from verify_detection_crop import boxes_agree
 
 
@@ -48,6 +53,47 @@ class CropLabelsTests(unittest.TestCase):
         swapped = ((1, *projected[0][1:]), projected[1])
         self.assertFalse(boxes_agree(original, swapped, scale, offset, mirrored=True))
         self.assertFalse(boxes_agree(original, projected * 2, scale, offset, mirrored=True))
+
+
+class CorrectedCandidateTests(unittest.TestCase):
+    def test_export_requires_completion_marker_and_exact_frame_path(self):
+        review = SimpleNamespace(frames={"frame": {"label_path": "train/labels/frame.txt"}})
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            with self.assertRaisesRegex(ValueError, "completion marker"):
+                verify_export(review, root)
+            (root / "_COMPLETE").touch()
+            manifest = {"manifest_sha256": MANIFEST_SHA256, "classes": CLASSES, "progress_revision": 423,
+                        "frames": [{"frame_id": "frame", "status": "reviewed", "label_path": "val/labels/frame.txt"}]}
+            (root / "review.json").write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Wrong label path"):
+                verify_export(review, root)
+
+    def test_normalized_boxes_allow_edge_roundoff_but_reject_invalid_labels(self):
+        self.assertEqual(len(verified_boxes(b"3 0.95 0.5 0.10000001 0.1\n")), 1)
+        good = b"0 0.5 0.5 0.1 0.1\n"
+        for label in (b"", good * 2, b"4 0.5 0.5 0.1 0.1\n", b"0 0.5 0.5 0.0 0.1\n",
+                      b"0 0.5 nan 0.1 0.1\n", b"0 0.97 0.5 0.1 0.1\n"):
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                verified_boxes(label)
+
+    def test_candidate_boundaries_reject_frame_keys_and_protected_near_duplicates(self):
+        train = {"source": "training.jpg", "split": "train", "group": "a", "frame_id": "frame",
+                 "sha256": "a", "pixel_sha256": "pixels-a", "phash": "0000000000000000",
+                 "raw_label_sha256": "label-a", "related_original": None}
+        val = {**train, "source": "validation.jpg", "split": "val", "group": "b", "frame_id": "other",
+               "sha256": "b", "pixel_sha256": "pixels-b", "phash": "ffffffffffffffff"}
+        rows = [train, val]
+        provenance = [{**row, "proposed_partition": row["split"]} for row in rows]
+        verify_boundaries(rows, provenance)
+        protected = {**train, "source": "protected.jpg", "proposed_partition": "ifap",
+                     "group": "c", "frame_id": "protected", "sha256": "c", "pixel_sha256": "pixels-c",
+                     "phash": "0000000000000007"}
+        with self.assertRaisesRegex(ValueError, "protected provenance"):
+            verify_boundaries(rows, [*provenance, protected])
+        val["frame_id"] = provenance[1]["frame_id"] = train["frame_id"]
+        with self.assertRaisesRegex(ValueError, "split overlap"):
+            verify_boundaries(rows, provenance)
 
 
 if __name__ == "__main__":

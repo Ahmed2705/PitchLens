@@ -15,6 +15,8 @@ The Foundation Reliability audit covers both baseline exports plus Wrkplace, IFA
 
 [Detection candidate v1](DETECTION_CANDIDATE_V1.md) documents the revised split, reservation, and existing-checkpoint development evaluation for architectural review.
 
+Detection Candidate v2 integrates the completed Wrkplace corrections and records the 960-pixel development comparison with production. [Candidate v2 training and evaluation](DETECTION_CANDIDATE_V2.md)
+
 ## Split and limitations
 
 SHA-256 identifies exact duplicates; a 64-bit DCT perceptual hash flags similar images. The filename prefix groups related sequences and crops across both exports. A visual stadium review prompted conservative grouping of the 15 prefixes into six stadium groups in [the source configuration](../configs/detection_sources.json); cross-prefix perceptual-hash candidates are grouped as well. Stadium grouping is a precaution, not proof of original match identity; the source does not provide authoritative match IDs, so residual leakage remains possible.

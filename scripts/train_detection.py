@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 
 PROJECT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("YOLO_CONFIG_DIR", str(PROJECT / "outputs" / "ultralytics"))
@@ -29,6 +30,8 @@ def main() -> None:
     parser.add_argument("--run", type=Path, required=True, help="New experiment directory")
     parser.add_argument("--config", type=Path, default=PROJECT / "configs" / "detection_train.json")
     parser.add_argument("--smoke", action="store_true", help="Run one epoch using 5% of training images")
+    parser.add_argument("--save-resumable", action="store_true",
+                        help="Keep the latest checkpoint with optimizer and scaler state")
     args = parser.parse_args()
     data, weights, run = args.data.resolve(), args.weights.resolve(), args.run.resolve()
     for path in (data, weights, args.config):
@@ -73,8 +76,19 @@ def main() -> None:
             writer.writerow([trainer.epoch + 1, torch.cuda.max_memory_allocated(trainer.device),
                              torch.cuda.max_memory_reserved(trainer.device), free, total])
 
+    def save_resumable(trainer) -> None:
+        # Ultralytics strips optimizer state from last.pt during final evaluation.
+        # Publish a complete copy before it is stripped, preserving the previous
+        # epoch's snapshot if a copy is interrupted.
+        path = trainer.last.with_name("last-resumable.pt")
+        temporary = path.with_suffix(".tmp")
+        shutil.copyfile(trainer.last, temporary)
+        temporary.replace(path)
+
     model.add_callback("on_train_epoch_start", start_epoch)
     model.add_callback("on_fit_epoch_end", log_memory)
+    if args.save_resumable:
+        model.add_callback("on_model_save", save_resumable)
     model.train(data=str(data), project=str(run.parent), name=run.name, exist_ok=True, **parameters)
 
 

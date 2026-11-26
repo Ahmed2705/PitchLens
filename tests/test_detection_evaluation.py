@@ -1,5 +1,6 @@
 """Check fixed-threshold detection matching against known boxes."""
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +9,7 @@ import cv2
 import numpy as np
 
 from pitchlens.detector import Detection
-from scripts.evaluate_detection import confusion_at_default_threshold, fixed_threshold_scores, targets_for
+from scripts.evaluate_detection import confusion_at_default_threshold, fixed_threshold_scores, group_validation_images, targets_for
 
 
 class FakeDetector:
@@ -55,6 +56,22 @@ class EvaluationTests(unittest.TestCase):
         scores = fixed_threshold_scores(matrix)
         self.assertEqual(scores["ball"]["false_positive"], 1)
         self.assertEqual(scores["player"]["false_negative"], 1)
+
+    def test_grouping_covers_exactly_the_validation_image_set(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            data = root / "data.yaml"
+            images = [root / "val/images/a.jpg", root / "val/images/b.jpg"]
+            rows = [{"split": "val", "output": path.relative_to(root).as_posix(), "group": group}
+                    for path, group in zip(images, ("group-a", "group-b"))]
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps(rows), encoding="utf-8")
+            self.assertEqual(group_validation_images(data, images), {"group-a": images[:1], "group-b": images[1:]})
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                group_validation_images(data, images[:1])
+            manifest.write_text(json.dumps([*rows, rows[0]]), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Duplicate"):
+                group_validation_images(data, images)
 
 
 if __name__ == "__main__":

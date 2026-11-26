@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import gc
 import hashlib
 import json
@@ -18,6 +19,7 @@ os.environ.setdefault("YOLO_AUTOINSTALL", "False")
 import cv2
 import numpy as np
 import torch
+import yaml
 from ultralytics import YOLO
 from ultralytics.data.utils import check_det_dataset
 from ultralytics.utils.metrics import ConfusionMatrix
@@ -75,6 +77,37 @@ def fixed_threshold_scores(matrix: list[list[int]]) -> dict[str, dict[str, float
     return scores
 
 
+def group_validation_images(data: Path, images: list[Path]) -> dict[str, list[Path]]:
+    """Resolve development source groups from the same manifest used for training."""
+    image_groups = {}
+    for row in json.loads((data.parent / "manifest.json").read_bytes()):
+        if row["split"] != "val":
+            continue
+        path = (data.parent / row["output"]).resolve()
+        if path in image_groups:
+            raise ValueError(f"Duplicate validation manifest entry: {path}")
+        image_groups[path] = row["group"]
+    if set(image_groups) != {path.resolve() for path in images}:
+        raise ValueError("Validation manifest does not match the evaluation image set")
+    groups = defaultdict(list)
+    for path in images:
+        groups[image_groups[path.resolve()]].append(path)
+    return dict(groups)
+
+
+def average_precision(model: YOLO, data: Path, image_size: int, split: str, run: Path) -> dict:
+    metrics = model.val(data=str(data), split=split, imgsz=image_size, device=0, batch=1,
+                        workers=0, plots=False, project=str(run.parent), name=run.name, exist_ok=True, verbose=False)
+    per_class = {}
+    for index, class_id in enumerate(metrics.box.ap_class_index):
+        _, _, ap50, ap = metrics.box.class_result(index)
+        per_class[CLASS_NAMES[int(class_id)]] = {
+            "ap50": float(ap50), "ap50_95": float(ap),
+            "instances": int(metrics.nt_per_class[int(class_id)]), "images": int(metrics.nt_per_image[int(class_id)])}
+    return {"overall": {"map50": float(metrics.box.map50), "map50_95": float(metrics.box.map)},
+            "per_class": per_class, "validation_speed_ms": metrics.speed}
+
+
 def annotate(frame: np.ndarray, detector: Detector, destination: Path) -> None:
     canvas = frame.copy()
     for detection in detector.detect(frame):
@@ -97,6 +130,8 @@ def main() -> None:
     parser.add_argument("--image-size", type=int, default=960)
     parser.add_argument("--confidence", type=float, default=.25, help="Fixed operating threshold for confusion counts")
     parser.add_argument("--benchmark-frames", type=int, default=50)
+    parser.add_argument("--by-source-group", action="store_true",
+                        help="Report separate development metrics for each source group in manifest.json")
     args = parser.parse_args()
     data, weights, run = args.data.resolve(), args.weights.resolve(), args.run.resolve()
     if not data.is_file() or not weights.is_file():
@@ -105,6 +140,8 @@ def main() -> None:
         parser.error("CUDA is required for this GPU evaluation")
     if args.benchmark_frames < 1:
         parser.error("benchmark-frames must be positive")
+    if args.by_source_group and args.split != "val":
+        parser.error("Source grouping requires the development validation split")
     if not 0 <= args.confidence <= 1 or args.image_size < 32 or args.image_size % 32:
         parser.error("Invalid confidence or image size")
     dataset = check_det_dataset(data, autodownload=False, split=args.split)
@@ -112,6 +149,7 @@ def main() -> None:
     validation_images = sorted(Path(dataset["val"]).glob("*.jpg"))
     if not images or not validation_images:
         parser.error("Evaluation and validation image directories must contain images")
+    groups = group_validation_images(data, images) if args.by_source_group else {}
     run.mkdir(parents=True, exist_ok=False)
     info = {"split": args.split, "data": str(data), "data_sha256": digest(data), "weights": str(weights),
             "weights_sha256": digest(weights), "image_size": args.image_size, "confidence": args.confidence,
@@ -122,17 +160,21 @@ def main() -> None:
     (run / "evaluation_input.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
 
     model = YOLO(str(weights))
-    metrics = model.val(data=str(data), split=args.split, imgsz=args.image_size, device=0, batch=1,
-                        workers=0, plots=False, project=str(run.parent), name=run.name, exist_ok=True, verbose=False)
-    overall = {"map50": float(metrics.box.map50), "map50_95": float(metrics.box.map)}
-    per_class = {}
-    for index, class_id in enumerate(metrics.box.ap_class_index):
-        _, _, ap50, ap = metrics.box.class_result(index)
-        per_class[CLASS_NAMES[int(class_id)]] = {
-            "ap50": float(ap50), "ap50_95": float(ap),
-            "instances": int(metrics.nt_per_class[int(class_id)]), "images": int(metrics.nt_per_image[int(class_id)])}
-    info.update(overall=overall, per_class=per_class, validation_speed_ms=metrics.speed)
-    del model, metrics
+    info.update(average_precision(model, data, args.image_size, args.split, run))
+    overall, per_class = info["overall"], info["per_class"]
+    if groups:
+        info["source_groups"] = {}
+    for index, (group, paths) in enumerate(groups.items(), 1):
+        group_run = run / f"group-{index}"
+        group_run.mkdir()
+        image_list = group_run / "images.txt"
+        image_list.write_text("".join(f"{path.as_posix()}\n" for path in paths), encoding="utf-8")
+        group_data = group_run / "data.yaml"
+        group_data.write_text(yaml.safe_dump({"train": dataset["train"], "val": image_list.as_posix(),
+                                              "names": list(CLASS_NAMES)}), encoding="utf-8")
+        summary = average_precision(model, group_data, args.image_size, "val", group_run)
+        info["source_groups"][group] = {"images": len(paths), **summary}
+    del model
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -157,7 +199,9 @@ def main() -> None:
                          "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
                          "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
                          "gpu": torch.cuda.get_device_name(0)}
-    matrix = confusion_at_default_threshold(detector, images)
+    group_matrices = {group: confusion_at_default_threshold(detector, paths) for group, paths in groups.items()}
+    matrix = (np.sum(list(group_matrices.values()), axis=0).tolist() if group_matrices
+              else confusion_at_default_threshold(detector, images))
     fixed_scores = fixed_threshold_scores(matrix)
     for name, values in fixed_scores.items():
         per_class.setdefault(name, {}).update(values)
@@ -166,6 +210,11 @@ def main() -> None:
     info["confusion_matrix"] = {"rows": "predicted class plus background", "columns": "true class plus background",
                                 "classes": [*CLASS_NAMES, "background"], "iou_match": .5,
                                 "confidence": args.confidence, "matrix": matrix}
+    for group, group_matrix in group_matrices.items():
+        summary = info["source_groups"][group]
+        summary["confusion_matrix"] = group_matrix
+        for name, values in fixed_threshold_scores(group_matrix).items():
+            summary["per_class"].setdefault(name, {}).update(values)
     for index, path in enumerate(validation_images[:3], 1):
         annotate(read_image(path), detector, run / f"validation_sample_{index}.jpg")
     (run / "evaluation.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
