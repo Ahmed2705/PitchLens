@@ -6,18 +6,22 @@ from dataclasses import asdict
 import hashlib
 import json
 from pathlib import Path
+import warnings
+from zipfile import ZipFile
 
 import cv2
 import numpy as np
 
 from pitchlens.calibration import PitchCalibrator, PitchConfig, project
 
+from scripts.audit_foundation_datasets import SOCCERNET_SHA
 from scripts.score_planar_calibration import (
     draw_markings, planar_markings, read_planar_labels, score_planar,
 )
 
 ARC_INDICES = np.array([10, 11, 18, 19])
 VARIANTS = ('original', 'corrected')
+SOCCERNET_IMAGES = 3212
 
 
 def compare_calibrators(config):
@@ -180,48 +184,73 @@ def sha256(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def image_rows(args, detector, pair, markings):
-    audit = json.loads(args.audit.read_text(encoding='utf-8'))
-    independent = args.mode == 'soccernet'
-    if independent:
-        from scripts.audit_foundation_datasets import SOCCERNET_SHA
+def soccernet_rows(args, detector, pair, markings):
+    """Read images, annotations and match groups from the publisher-verified ZIP."""
+    with args.input.open('rb') as stream:
+        if hashlib.file_digest(stream, 'sha256').hexdigest() != SOCCERNET_SHA:
+            raise ValueError('SoccerNet archive differs from the publisher SHA-256')
+        stream.seek(0)
+        with ZipFile(stream) as archive:
+            index = json.loads(archive.read('valid/match_info.json'))
+            images = {name for name in archive.namelist() if name.startswith('valid/') and name.endswith('.jpg')}
+            if images != {f'valid/{image}' for image in index} or len(images) != SOCCERNET_IMAGES:
+                raise ValueError('Expected the full SoccerNet validation image set and matching index')
+            for image in sorted(index):
+                path = f'valid/{image}'
+                frame = decode_image(archive.read(path), path)
+                height, width = frame.shape[:2]
+                text = archive.read(Path(path).with_suffix('.json').as_posix())
+                labels, excluded = read_planar_labels(json.loads(text), markings, width, height)
+                row = compare_frame(detector, frame, pair, cut=True, markings=markings, labels=labels)
+                row.update(id=path, split='valid', cut=False, label_sha256=hashlib.sha256(text).hexdigest(),
+                           usable_markings=len(labels), usable_points=sum(map(len, labels.values())),
+                           excluded=excluded, event=index[image])
+                yield row
 
-        if audit['archive']['sha256'] != SOCCERNET_SHA or len(audit['rows']) != 3212:
-            raise ValueError('Expected the audited full publisher SoccerNet validation split')
-        index = json.loads((args.input / 'valid/match_info.json').read_text(encoding='utf-8'))
-        paths = {Path(item['path']).name for item in audit['rows']}
-        if paths != index.keys() or len(paths) != 3212:
-            raise ValueError('SoccerNet match index and audited images differ')
+
+def decode_image(data, path):
+    frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise ValueError(f'Undecodable image: {path}')
+    return frame
+
+
+def roboflow_rows(args, detector, pair):
+    audit = json.loads(args.audit.read_text(encoding='utf-8'))
     for item in sorted(audit['rows'], key=lambda row: row['path']):
-        path, label = (args.input / item[key] for key in ('path', 'label'))
+        path = args.input / item['path']
         data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != item['sha256']:
             raise ValueError(f'Image differs from the audit: {path}')
-        frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-        if frame is None:
-            raise ValueError(f'Undecodable audited image: {path}')
+        frame = decode_image(data, path)
         height, width = frame.shape[:2]
-        text = label.read_bytes()
-        if independent:
-            labels, excluded = read_planar_labels(json.loads(text), markings, width, height)
-            row = compare_frame(detector, frame, pair, cut=True, markings=markings, labels=labels)
-            row.update(usable_markings=len(labels), usable_points=sum(map(len, labels.values())),
-                       excluded=excluded, event=index[path.name])
-        else:
-            row = compare_frame(detector, frame, pair, cut=True, expected=roboflow_labels(text, width, height))
+        text = (args.input / item['label']).read_bytes()
+        row = compare_frame(detector, frame, pair, cut=True, expected=roboflow_labels(text, width, height))
         # Static samples start fresh. This flag in the report is reserved for video cuts.
         row.update(id=item['path'], split=item['split'], cut=False,
                    label_sha256=hashlib.sha256(text).hexdigest())
         yield row
 
 
-def video_rows(args, detector, pair):
+def video_decode_status(reported, decoded, stop_before):
+    if stop_before is not None:
+        status = 'frame_limit' if decoded == stop_before else 'early_end'
+    elif reported <= 0:
+        status = 'unreported_frame_count'
+    else:
+        status = 'complete' if decoded == reported else 'frame_count_mismatch'
+    return {'reported_frames': reported if reported > 0 else None, 'decoded_frames': decoded,
+            'stop_before': stop_before, 'status': status}
+
+
+def video_rows(args, detector, pair, decoding):
     from pitchlens.tracking import Tracker
 
     capture = cv2.VideoCapture(str(args.input))
     try:
         if not capture.isOpened():
             raise ValueError(f'Cannot open {args.input}')
+        reported = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
         tracker = Tracker(capture.get(cv2.CAP_PROP_FPS))
         frame_index = 0
         while args.stop_before is None or frame_index < args.stop_before:
@@ -233,6 +262,7 @@ def video_rows(args, detector, pair):
             row.update(id=frame_index, segment=timing.segment)
             yield row
             frame_index += 1
+        decoding.update(video_decode_status(reported, frame_index, args.stop_before))
     finally:
         capture.release()
 
@@ -284,15 +314,15 @@ def video_overlays(path, output, rows, markings):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=('roboflow', 'video', 'soccernet'))
-    parser.add_argument('--input', type=Path, required=True)
-    parser.add_argument('--audit', type=Path, help='Existing dataset-audit-v1 JSON for image modes')
+    parser.add_argument('--input', type=Path, required=True, help='Roboflow directory, video or publisher valid.zip')
+    parser.add_argument('--audit', type=Path, help='Existing dataset-audit-v1 JSON for Roboflow')
     parser.add_argument('--weights', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True, help='New local output directory')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cuda')
     parser.add_argument('--stop-before', type=int, help='Exclusive video frame limit')
     args = parser.parse_args()
-    if args.mode != 'video' and args.audit is None:
-        parser.error('--audit is required for image modes')
+    if (args.audit is not None) != (args.mode == 'roboflow'):
+        parser.error('--audit is required in roboflow mode and valid only in that mode')
     if args.stop_before is not None and (args.mode != 'video' or args.stop_before < 1):
         parser.error('--stop-before must be a positive frame index in video mode')
 
@@ -306,7 +336,13 @@ def main():
     detector = PitchLandmarkDetector(args.weights, args.device)
     args.output.mkdir()
     rows = []
-    source = video_rows(args, detector, pair) if args.mode == 'video' else image_rows(args, detector, pair, markings)
+    decoding = {}
+    if args.mode == 'video':
+        source = video_rows(args, detector, pair, decoding)
+    elif args.mode == 'roboflow':
+        source = roboflow_rows(args, detector, pair)
+    else:
+        source = soccernet_rows(args, detector, pair, markings)
     with (args.output / 'frames.jsonl').open('x', encoding='utf-8') as stream:
         for row in source:
             rows.append(row)
@@ -314,10 +350,12 @@ def main():
     if not rows:
         raise ValueError('No input frames decoded')
     if args.mode == 'video':
-        if args.stop_before is not None and len(rows) != args.stop_before:
-            raise ValueError('Video ended before the requested frame limit')
+        if decoding['status'] not in ('complete', 'frame_limit'):
+            warnings.warn(f'Video coverage is unverified: {decoding}', stacklevel=1)
         video_overlays(args.input, args.output, rows, markings)
     report = summarize(rows, args.mode)
+    if args.mode == 'video':
+        report['video_decode'] = decoding
     if args.mode == 'soccernet':
         matches = sorted({(row['event']['league'], row['event']['season'], row['event']['match'])
                           for row in rows})
@@ -328,7 +366,7 @@ def main():
         }
     report.update(mode=args.mode, config=asdict(config), device=args.device, opencv=cv2.__version__,
                   weights_sha256=CHECKPOINT_SHA256, source=str(args.input),
-                  input_sha256=sha256(args.input if args.mode == 'video' else args.audit))
+                  input_sha256=SOCCERNET_SHA if args.mode == 'soccernet' else sha256(args.audit or args.input))
     (args.output / 'summary.json').write_text(json.dumps(report, indent=2, allow_nan=False), encoding='utf-8')
 
 
