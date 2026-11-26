@@ -75,6 +75,25 @@ class PitchCalibrationTests(unittest.TestCase):
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 PitchConfig(**settings)
 
+    def test_penalty_arc_ids_intersect_box_fronts_and_penalty_circles(self):
+        for length, width in [(105, 68), (110, 70)]:
+            with self.subTest(length=length, width=width):
+                points = PitchConfig(length_m=length, width_m=width).landmarks()
+                arcs = points[[10, 11, 18, 19]]
+                np.testing.assert_allclose(arcs[:, 0], [16.5, 16.5, length - 16.5, length - 16.5])
+                np.testing.assert_allclose(np.linalg.norm(arcs - points[[8, 8, 21, 21]], axis=1), 9.15)
+                np.testing.assert_array_equal(arcs[:, 1] < width / 2, [True, False, True, False])
+                np.testing.assert_allclose(arcs[[0, 2], 1] + arcs[[1, 3], 1], width)
+                np.testing.assert_allclose(points[[6, 7, 22, 23], 1],
+                                           [width / 2 - 9.16, width / 2 + 9.16] * 2)
+
+    def test_landmark_order_matches_export_horizontal_flip(self):
+        flip = [24, 25, 26, 27, 28, 29, 22, 23, 21, 17, 18, 19, 20, 13, 14, 15,
+                16, 9, 10, 11, 12, 8, 6, 7, 0, 1, 2, 3, 4, 5, 31, 30]
+        mirrored = self.world.copy()
+        mirrored[:, 0] = self.config.length_m - mirrored[:, 0]
+        np.testing.assert_allclose(mirrored, self.world[flip])
+
     def test_clipped_landmarks_and_ground_contact_are_unavailable(self):
         points = self.observe()
         points[:4, 0] = [0, 1280, 0, 1280]

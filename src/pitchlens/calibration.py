@@ -34,12 +34,15 @@ class PitchConfig:
         mid = width / 2
         p0, p1 = mid - 20.16, mid + 20.16
         g0, g1 = mid - 9.16, mid + 9.16
+        # IDs 11, 12, 19 and 20 label where the penalty arc meets the box.
+        arc_offset = math.sqrt(9.15**2 - (16.5 - 11)**2)
+        a0, a1 = mid - arc_offset, mid + arc_offset
         return np.array([
             (0, 0), (0, p0), (0, g0), (0, g1), (0, p1), (0, width),
             (5.5, g0), (5.5, g1), (11, mid),
-            (16.5, p0), (16.5, g0), (16.5, g1), (16.5, p1),
+            (16.5, p0), (16.5, a0), (16.5, a1), (16.5, p1),
             (length/2, 0), (length/2, mid-9.15), (length/2, mid+9.15), (length/2, width),
-            (length-16.5, p0), (length-16.5, g0), (length-16.5, g1), (length-16.5, p1),
+            (length-16.5, p0), (length-16.5, a0), (length-16.5, a1), (length-16.5, p1),
             (length-11, mid), (length-5.5, g0), (length-5.5, g1),
             (length, 0), (length, p0), (length, g0), (length, g1), (length, p1), (length, width),
             (length/2-9.15, mid), (length/2+9.15, mid),

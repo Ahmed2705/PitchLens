@@ -2,7 +2,7 @@
 
 Feature #04 is an opt-in local evaluation mode in the existing tracking runner. It uses the Roboflow Soccer example's YOLOv8 pose checkpoint, independently of the existing YOLO26s detector. The pose model predicts 32 ordered pitch landmarks at 640-pixel input. These include pitch corners, box geometry, penalty spots, halfway-line points and four points on the center circle. The ordered template follows the [reference configuration](https://github.com/roboflow/sports/blob/main/sports/configs/soccer.py). Virtual landmarks on lines are treated as model predictions like the visible intersections.
 
-The Foundation Reliability audit reviewed the Roboflow field v18 keypoint export and the full SoccerNet Calibration 2023 validation archive. The reports are in `E:\PitchLensStorage\outputs\dataset-audit-v1`. SoccerNet validation is evaluation-only. Roboflow v18 shares the checkpoint's dataset project lineage. In the audit, v18 labels for landmarks 11, 12, 19 and 20 agreed more closely with penalty-arc intersections than the current template. Template semantics and independent scoring are pending architectural review.
+The Foundation Reliability audit reviewed the Roboflow field v18 keypoint export and the full SoccerNet Calibration 2023 validation archive. The reports are in `E:\PitchLensStorage\outputs\dataset-audit-v1`. SoccerNet validation is evaluation-only. Roboflow v18 shares the checkpoint's dataset project lineage. The [reliability comparison](#template-reliability-comparison) records the four corrected coordinates and the remaining calibration errors.
 
 ## Checkpoint and environment
 
@@ -56,3 +56,66 @@ Both annotated videos decoded to the same number of frames as their JSONL. All e
 On desktop, 266 of 269 mapped goalkeeper observations fell in a modeled penalty area, and none of the seven U19 goalkeeper observations could be mapped. This supports checking a goalkeeper's likely defending end in wide views. It does not link that end to a team, so all goalkeeper team labels remained unknown.
 
 The verified MP4, JSONL and summary JSON use the stems `pitch-desktop-v2` and `pitch-u19-v2` under `E:\PitchLensStorage\outputs`. The initial landmark overlays and sample reports are in `pitch-benchmark-desktop-v1` and `pitch-benchmark-u19-v1` in the same directory.
+
+## Template reliability comparison
+
+The reference's ordered `vertices` array and v18's 32-element `flip_idx` agree on ordering, including the half-to-half pairs 11↔19 and 12↔20. The reference's display labels are a separate numbering scheme. Its numerical example puts the four vertices at the goal-area half-width, 9.16 m from the pitch centerline. The audited numbered annotation overlays put them where the arcs meet the penalty-area fronts. At a front 16.5 m from the goal line, the offset from the 11 m penalty spot is 5.5 m. The 9.15 m arc radius gives a transverse offset of `sqrt(9.15² − 5.5²) = 7.31249… m`. IDs 11 and 19 are on the lower-coordinate side, and IDs 12 and 20 are on the higher-coordinate side. The four y coordinates changed. The v9 training manifest is unavailable, so the reference, v18 semantics and frozen v9 comparisons provide complementary evidence. [Roboflow vertex order](https://github.com/roboflow/sports/blob/main/sports/configs/soccer.py) · [IFAB Law 1](https://theifab.com/laws/latest/the-field-of-play/)
+
+On the 317 audited v18 images, an annotation-only check held out all four arc landmarks from one common robust control fit. It scored visibly annotated points on the 960 × 960 stretched exports. Only controls accepted by the existing estimator contribute.
+
+| 1-based landmark | Eligible checks | Original median (px) | Corrected median (px) |
+| --- | ---: | ---: | ---: |
+| 11 | 168 | 10.73 | 2.52 |
+| 12 | 146 | 17.73 | 2.40 |
+| 19 | 167 | 12.12 | 1.97 |
+| 20 | 135 | 19.76 | 2.14 |
+
+One v9 inference per image or frame supplied identical observations to both variants. Both used the default 105 × 68 m field, the same estimator settings and independent smoothing histories. Still images start fresh. Video uses the current tracker cut signal, including the cut before zero-based frame 925.
+
+| Measurement | Original | Corrected |
+| --- | ---: | ---: |
+| Roboflow fits from visible annotation coordinates | 296 / 317 | 313 / 317 |
+| Roboflow fits from v9 predictions | 125 / 317 (39.4%) | 175 / 317 (55.2%) |
+| Roboflow projected landmark error, p50 / p90, common accepted images (px) | 56.02 / 182.73 | 55.78 / 180.67 |
+| Roboflow projected error for visible IDs missing from candidate input, p50 / p90, common accepted images (px) | 153.83 / 289.34 | 151.24 / 284.07 |
+| Desktop/Egypt fits from v9 predictions | 591 / 928 (63.7%) | 829 / 928 (89.3%) |
+| Desktop/Egypt inlier RMSE, p50 / p90 (px) | 3.10 / 4.21 | 3.23 / 4.40 |
+
+Roboflow's common-acceptance comparison uses 115 images and 1,824 visible labels, including 470 without a candidate prediction. Both transforms project the same physical check coordinates. Direct v9-to-label distance was 46.45 px at p50 and 100.29 px at p90 for 3,352 candidate predictions matched by ID among 4,802 visible labels. Labels with visibility 0 or 1 are excluded. The large direct errors identify a landmark-prediction problem before fitting. The resized v18 export and checkpoint share lineage, so the result is diagnostic and the effect of square stretching is unmeasured.
+
+- In v18 frame `121364_4_3`, the predicted penalty-box and goal-area points are visibly displaced. The corrected transform follows those predictions and misses the painted lines despite a 1.86 px inlier RMSE. In `42ba34_2_10`, both templates accept the same seven inliers out of nine candidates with 1.74 px RMSE. The fit roughly follows midfield while projecting the near touchline into the stands. Its support is concentrated around midfield and the far side, and the low residual conceals the extrapolation error.
+- Desktop frame 505 accepts both fits with eight inliers. The corrected projection drifts off the painted halfway line more visibly than the original. Frame 540 is newly accepted with an inlier RMSE of 3.76 px; the projected halfway line and circle miss the markings while most support lies to the right. Frame 623 passes with six of eight candidates and visibly misplaces the penalty box. These whole-pitch overlays diagnose the transform. The production mapper separately restricts player contacts to the inlier hull and its extrapolation margin.
+- The corrected desktop fit rejected 92 frames for too few inliers and seven for too few candidates. At frame 914 both variants had seven candidates, but only four or five inliers. At the cut to a close-up on frame 925, there were just two candidates and both rejected. This distinguishes inconsistent correspondences from frames without enough candidate landmarks. Of the changes in acceptance, 245 frames gained a fit and seven lost one. The footage has no independent player or landmark labels, so coverage and visual examples cannot establish a change in metric accuracy.
+- The desktop file is byte-identical to the original EGYPT audit input (SHA-256 `879b7996768f595afb7d3e17197409256fba2d1ada84d2e71b5c8637c80c6bc6`). It was the available raw clip in the project and configured external storage. U19 and the other audit views were only available as previously annotated outputs or reports, so their original pixels were unavailable for a comparable run. The reserved LIV interval was left unopened.
+
+Reproduce the development comparisons from the project root with the checkpoint environment flags above. Each command requires a new output directory and writes per-frame predictions, paired fit metadata, and a summary. Video also writes selected paired overlays with predictions in yellow and projected ground markings in blue.
+
+```powershell
+$storage = 'E:\PitchLensStorage'
+$audit = "$storage\outputs\dataset-audit-v1"
+$weights = "$storage\models\football-pitch-detection-v9.pt"
+.\.venv\Scripts\python.exe -m scripts.evaluate_calibration roboflow `
+  --input "$storage\datasets\calibration\roboflow-field-detection-v18" `
+  --audit "$audit\roboflow-field-detection-v18.json" --weights $weights `
+  --output outputs/calibration-roboflow-new
+.\.venv\Scripts\python.exe -m scripts.evaluate_calibration video `
+  --input "$storage\footage\Desktop 2026.11.25 - 15.59.30.02.mp4" `
+  --weights $weights --output outputs/calibration-desktop-new
+```
+
+The measured summaries are in `outputs/calibration-reliability-v1-roboflow-canonical` and `outputs/calibration-reliability-v1-desktop`. The three Roboflow inspection overlays are in `outputs/calibration-reliability-v1-roboflow`.
+
+## Reserved SoccerNet evaluation
+
+The protocol and scorer are ready for architectural review. SoccerNet predictions and scores were left uncomputed. Use the existing publisher-matched validation split in `dataset-audit-v1`, with all 3,212 images from 55 matches, including both official rows `01463.jpg` and `01464.jpg`. Keep the partition outside training, threshold selection, model selection and calibration changes. The full v9 training inventory is unavailable. [SoccerNet annotations and challenge evaluation](https://github.com/SoccerNet/sn-calibration#evaluation)
+
+- Score one image at a time with independent state, the same predictions per variant and the same physical 105 × 68 m geometry for scoring. Use ground-plane markings by semantic name. Do not derive landmark coordinates from clipped line endpoints. Exclude elevated and unknown classes. Drop nonfinite points and overflow beyond 1 native pixel, clamp smaller overflow, and deduplicate samples within each marking. A single usable point can score an existing fit. Record exclusions and retained support per image.
+- Project visible segments in native 960 × 540 coordinates. Sample the center circle every degree and each penalty arc at 111 angles including both endpoints. Clip to the camera-facing viewport. Measure each annotation point's Euclidean distance to the nearest point on the projected marking of the same name. Test both global pitch orientations (0° and 180°), choose the one with more points within 5 px, then lower summed distance. A marking without visible projected segments counts as a miss. Report null for a quantile that falls among failed projections.
+- Report accepted coverage and p50/p90 pixels, including the common accepted subset. Report the fraction within 5 px both among accepted fits and across all eligible points, counting fit rejection as a miss in the latter. Keep per-match summaries and event identifiers. For uncertainty in a later report, resample complete matches with replacement, using the same draws for both templates, to avoid treating repeated event frames as independent. This measures planar image alignment. The official SoccerNet 3D camera format and completeness × JaC@5 score require a camera model with elevated goal geometry.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_calibration soccernet `
+  --input "$storage\datasets\calibration\soccernet-calibration-2023-valid" `
+  --audit "$audit\soccernet-calibration-2023-valid.json" --weights $weights `
+  --output outputs/calibration-soccernet-new
+```
