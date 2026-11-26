@@ -79,6 +79,19 @@ class PitchCalibrationTests(unittest.TestCase):
         result = self.calibrator.update(self.observe(camera), frame.shape, frame=frame)
         self.assertTrue(result.metadata()['valid'], result.reason)
 
+    def test_weak_neighbor_cannot_explain_coherently_shifted_paint(self):
+        camera = np.array([[7.5, 0., 100], [0., 1., 220], [0., 0., 1.]])
+        frame = np.full((540, 960, 3), (45, 110, 55), dtype=np.uint8)
+        for name, ids in STRAIGHT_MARKINGS.items():
+            points = project(camera, self.world[np.array(ids) - 1])
+            if points[0, 0] == points[1, 0] or name in ('Small rect. left top', 'Small rect. right top'):
+                cv2.line(frame, *np.rint(points).astype(int), (220, 225, 220), 1)
+        self.assertTrue(self.calibrator.update(self.observe(camera), frame.shape, frame=frame).metadata()['valid'])
+        shifted = self.observe(camera)
+        shifted[:, 1] += 11
+        self.assertEqual(self.calibrator.update(shifted, frame.shape, frame=frame).reason,
+                         'contradictory_paint')
+
     def test_recovers_contact_despite_outlier(self):
         points = self.observe()
         points[8, :2] += 80

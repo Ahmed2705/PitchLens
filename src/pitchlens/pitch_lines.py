@@ -107,6 +107,7 @@ class PitchLineCheck:
         # An isolated player or logo can create a bright peak. A parallel offset
         # repeated along a line is evidence against the projected position.
         visible_segments = None
+        corroborated = np.flatnonzero((matches >= 4) & (matches >= 0.5 * samples_on_grass))
         for line in np.flatnonzero(samples_on_grass >= 12):
             if matches[line] >= 0.25 * samples_on_grass[line]:
                 continue
@@ -121,9 +122,25 @@ class PitchLineCheck:
                     visible_segments, visible = clip_projected_segments(
                         self.segments, depth_sign * matrix, width, height)
                     visible_ids = np.flatnonzero(visible)
-                # Paint near another predicted marking cannot contradict this one.
-                others = visible_segments[visible_ids != line]
-                aliases = near_segments(coords[hits, offset + 4], others, 2.5 * scale)
+                # A neighboring marking can explain the ridge only when paint
+                # continues along that marking beyond the shared part of the ridge.
+                locations = coords[hits, offset + 4]
+                tangent = points[hits[-1]] - points[hits[0]]
+                tangent /= np.linalg.norm(tangent)
+                extent = locations @ tangent
+                margin = 2.5 * scale
+                aliases = np.zeros(len(hits), dtype=bool)
+                for neighbor in corroborated[corroborated != line]:
+                    segment = visible_segments[visible_ids == neighbor]
+                    near = near_segments(locations, segment, margin)
+                    if not near.any():
+                        continue
+                    other = points[(ids == neighbor) & aligned]
+                    along = other @ tangent
+                    before = other[along < extent.min() - margin]
+                    after = other[along > extent.max() + margin]
+                    if any(len(part) >= 4 and spans_marking(part) for part in (before, after)):
+                        aliases |= near
                 unexplained = hits[~aliases]
                 if len(unexplained) >= minimum and spans_marking(points[unexplained]):
                     return 'contradictory_paint'
