@@ -20,12 +20,13 @@ class PitchCalibrationTests(unittest.TestCase):
         return np.column_stack((project(self.camera if camera is None else camera, self.world),
                                 np.full(len(self.world), 0.95)))
 
-    def painted_frame(self):
-        frame = np.full(self.shape, (45, 110, 55), dtype=np.uint8)
-        for ids in STRAIGHT_MARKINGS.values():
-            points = project(self.camera, self.world[np.array(ids) - 1])
+    def painted_frame(self, camera=None, shape=None, faint_marking=None):
+        frame = np.full(self.shape if shape is None else shape, (45, 110, 55), dtype=np.uint8)
+        for name, ids in STRAIGHT_MARKINGS.items():
+            points = project(self.camera if camera is None else camera, self.world[np.array(ids) - 1])
             start, end = np.rint(points).astype(int)
-            cv2.line(frame, start, end, (220, 225, 220), 2)
+            color = (52, 115, 62) if name == faint_marking else (220, 225, 220)
+            cv2.line(frame, start, end, color, 1 if faint_marking else 2)
         return frame
 
     def test_concentrated_landmarks_reject_an_exact_fit(self):
@@ -71,6 +72,12 @@ class PitchCalibrationTests(unittest.TestCase):
         result = self.calibrator.update(self.observe(), self.shape, frame=frame)
         self.assertEqual(result.reason, 'insufficient_paint')
         self.assertIsNone(result.image_to_pitch)
+
+    def test_neighboring_paint_does_not_veto_exact_fit_with_faint_goal_area(self):
+        camera = np.array([[7.5, 0., 100], [0., 0.75, 220], [0., 0., 1.]])
+        frame = self.painted_frame(camera, (540, 960, 3), 'Small rect. left top')
+        result = self.calibrator.update(self.observe(camera), frame.shape, frame=frame)
+        self.assertTrue(result.metadata()['valid'], result.reason)
 
     def test_recovers_contact_despite_outlier(self):
         points = self.observe()

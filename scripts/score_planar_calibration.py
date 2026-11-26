@@ -5,7 +5,7 @@ import math
 import cv2
 import numpy as np
 
-from pitchlens.pitch_lines import STRAIGHT_MARKINGS
+from pitchlens.pitch_lines import STRAIGHT_MARKINGS, clip_projected_segments
 
 
 def planar_markings(config):
@@ -49,21 +49,10 @@ def read_planar_labels(raw, markings, width, height):
 
 def visible_segments(path, camera, width, height):
     """Clip each world segment in homogeneous image space, before dividing by depth."""
-    points = np.column_stack((path, np.ones(len(path)))) @ camera.T
-    x, y, z = points.T
-    margins = np.column_stack((z - 1e-9, x, width * z - x, y, height * z - y))
-    first, last = margins[:-1], margins[1:]
-    entering = (first < 0) & (last >= 0)
-    leaving = (first >= 0) & (last < 0)
-    crossing = entering | leaving
-    intersections = np.divide(first, first - last, out=np.zeros_like(first), where=crossing)
-    start = np.where(entering, intersections, 0).max(axis=1)
-    end = np.where(leaving, intersections, 1).min(axis=1)
-    visible = ~((first < 0) & (last < 0)).any(axis=1) & (start <= end)
-    a = points[:-1][visible]
-    delta = points[1:][visible] - a
-    ends = a[:, None, :] + np.column_stack((start[visible], end[visible]))[:, :, None] * delta[:, None, :]
-    return ends[:, :, :2] / ends[:, :, 2, None]
+    points = np.column_stack((path, np.ones(len(path))))
+    segments, _ = clip_projected_segments(np.stack((points[:-1], points[1:]), axis=1),
+                                          camera, width, height)
+    return segments
 
 
 def camera_on_support(image_to_pitch, support_point):

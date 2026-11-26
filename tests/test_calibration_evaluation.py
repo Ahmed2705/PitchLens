@@ -13,6 +13,7 @@ import numpy as np
 from pitchlens.calibration import PitchCalibrator, PitchConfig, project
 from scripts.evaluate_calibration import (
     compare_calibrators, compare_frame, main, roboflow_labels, soccernet_rows, summarize, video_decode_status,
+    video_overlays,
 )
 from scripts.score_planar_calibration import planar_markings, read_planar_labels, score_planar, visible_segments
 
@@ -69,6 +70,30 @@ class CalibrationEvaluationTests(unittest.TestCase):
         self.assertTrue(row['corrected']['valid'])
         self.assertEqual(row['validated']['reason'], 'insufficient_paint')
         self.assertIsNone(row['validated']['image_to_pitch'])
+
+    def test_reliability_compares_error_and_rejection_on_same_eligible_images(self):
+        points = project(self.camera, self.world)
+        observations = np.column_stack((points, np.ones(32)))
+        observations[-3:, 2] = 0
+        detector = Mock()
+        detector.detect.return_value = observations
+        row = compare_frame(detector, self.frame, compare_calibrators(self.config, reliability=True),
+                            expected=(points, np.ones(32, dtype=bool)))
+        row['id'] = 'fixture'
+        report = summarize([row], 'roboflow', ('corrected', 'validated'))
+        self.assertEqual(report['corrected']['gross_errors']['eligible_images'], 1)
+        self.assertEqual(report['corrected']['gross_errors']['failed_with_rejections'], 0)
+        self.assertEqual(report['validated']['gross_errors']['eligible_images'], 1)
+        self.assertEqual(report['validated']['gross_errors']['failed_with_rejections'], 1)
+
+    def test_requested_overlay_must_be_in_frame_limit_and_decoded(self):
+        argv = ['evaluate_calibration', 'video', '--input', 'fixture.mp4', '--weights', 'fixture.pt',
+                '--output', 'fixture', '--stop-before', '100', '--overlay-frame', '100']
+        with (patch('sys.argv', argv), patch('sys.stderr'), self.assertRaises(SystemExit) as error):
+            main()
+        self.assertEqual(error.exception.code, 2)
+        with self.assertRaisesRegex(ValueError, r'not decoded: \[100\]'):
+            video_overlays(None, None, [{'id': 0}], self.markings, include=[100])
 
     def test_planar_labels_clamp_deduplicate_and_exclude_unmodeled_points(self):
         raw = {

@@ -14,12 +14,46 @@ STRAIGHT_MARKINGS = {
 }
 
 
+def clip_projected_segments(segments: np.ndarray, camera: np.ndarray,
+                            width: int, height: int) -> tuple[np.ndarray, np.ndarray]:
+    """Clip world segments to the camera-facing viewport before dividing by depth."""
+    points = segments @ camera.T
+    x, y, z = np.moveaxis(points, -1, 0)
+    margins = np.stack((z - 1e-9, x, width * z - x, y, height * z - y), axis=-1)
+    first, last = margins[:, 0], margins[:, 1]
+    entering = (first < 0) & (last >= 0)
+    leaving = (first >= 0) & (last < 0)
+    crossing = entering | leaving
+    intersections = np.divide(first, first - last, out=np.zeros_like(first), where=crossing)
+    start = np.where(entering, intersections, 0).max(axis=1)
+    end = np.where(leaving, intersections, 1).min(axis=1)
+    visible = ~((first < 0) & (last < 0)).any(axis=1) & (start <= end)
+    origin = points[visible, 0]
+    delta = points[visible, 1] - origin
+    clip = np.column_stack((start[visible], end[visible]))
+    ends = origin[:, None] + clip[..., None] * delta[:, None]
+    return ends[..., :2] / ends[..., 2, None], visible
+
+
+def near_segments(points: np.ndarray, segments: np.ndarray, radius: float) -> np.ndarray:
+    """Test whether each image point is close to any finite image segment."""
+    start, end = segments.transpose(1, 0, 2)
+    vector = end - start
+    distance = np.sum(vector ** 2, axis=1)
+    offsets = points[:, None] - start
+    along = np.sum(offsets * vector, axis=2)
+    fraction = np.clip(np.divide(along, distance, out=np.zeros_like(along), where=distance > 0), 0, 1)
+    return (np.linalg.norm(offsets - fraction[..., None] * vector, axis=2) <= radius).any(axis=1)
+
+
 class PitchLineCheck:
     """Look for narrow bright ridges with green turf on both sides."""
 
     def __init__(self, landmarks: np.ndarray):
         indices = np.array(list(STRAIGHT_MARKINGS.values())) - 1
-        start, end = landmarks[indices].transpose(1, 0, 2)
+        endpoints = landmarks[indices]
+        self.segments = np.dstack((endpoints, np.ones(endpoints.shape[:2])))
+        start, end = endpoints.transpose(1, 0, 2)
         delta = end - start
         # Omit the endpoints, where other markings often cross the sampling strip.
         fractions = np.linspace(0.05, 0.95, 48)
@@ -72,16 +106,27 @@ class PitchLineCheck:
 
         # An isolated player or logo can create a bright peak. A parallel offset
         # repeated along a line is evidence against the projected position.
+        visible_segments = None
         for line in np.flatnonzero(samples_on_grass >= 12):
             if matches[line] >= 0.25 * samples_on_grass[line]:
                 continue
             selected = (ids == line) & eligible
             shifted = ridge[selected]
-            counts = shifted.sum(axis=0)
-            peak = counts.argmax()
-            if (counts[peak] >= max(8, 0.45 * samples_on_grass[line])
-                    and spans_marking(points[selected][shifted[:, peak]])):
-                return 'contradictory_paint'
+            minimum = max(8, 0.45 * samples_on_grass[line])
+            for offset in np.flatnonzero(shifted.sum(axis=0) >= minimum):
+                hits = np.flatnonzero(selected)[shifted[:, offset]]
+                if not spans_marking(points[hits]):
+                    continue
+                if visible_segments is None:
+                    visible_segments, visible = clip_projected_segments(
+                        self.segments, depth_sign * matrix, width, height)
+                    visible_ids = np.flatnonzero(visible)
+                # Paint near another predicted marking cannot contradict this one.
+                others = visible_segments[visible_ids != line]
+                aliases = near_segments(coords[hits, offset + 4], others, 2.5 * scale)
+                unexplained = hits[~aliases]
+                if len(unexplained) >= minimum and spans_marking(points[unexplained]):
+                    return 'contradictory_paint'
         supported = np.flatnonzero((matches >= 4) & (matches >= 0.25 * samples_on_grass))
         if sum(spans_marking(points[(ids == line) & aligned]) for line in supported) < 2:
             return 'insufficient_paint'

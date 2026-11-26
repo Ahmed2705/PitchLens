@@ -71,6 +71,7 @@ def label_diagnostics(points, visible, observations, shape, pair):
     control[ARC_INDICES, 2] = 0
     oracle = PitchCalibrator(config, legacy_validation=True).update(control, shape)
     result = {'visible_ids': (np.flatnonzero(visible) + 1).tolist(), 'raw_px': raw,
+              'unobserved_visible_ids': (np.flatnonzero(visible & ~available) + 1).tolist(),
               'control': oracle.metadata(), 'held_out_arc_px': {}, 'label_fit': {}}
     annotations = np.column_stack((points, visible))
     for name, calibrator in compare_calibrators(config).items():
@@ -186,23 +187,27 @@ def summarize(rows, mode, variants=VARIANTS):
             for index in range(1, 33)
         }
         if after == 'validated':
-            # Absolute image error on labels that never entered either input fit.
-            # Count failures as over threshold and require at least three checks per image.
-            def gross_errors(name, selected):
-                medians = [percentile(list(row[name]['unobserved_label_px'].values()), 50)
-                           for row in selected if len(row[name].get('unobserved_label_px', {})) >= 3]
-                return {'images': len(medians),
-                        'over_50_px': sum(value is None or value > 50 for value in medians)}
+            def gross_errors(name, eligible):
+                accepted = [row[name] for row in eligible if row[name]['valid']]
+                medians = [percentile(list(item['unobserved_label_px'].values()), 50) for item in accepted]
+                over_threshold = sum(value is None or value > 50 for value in medians)
+                rejected = len(eligible) - len(accepted)
+                return {'eligible_images': len(eligible), 'accepted_images': len(accepted),
+                        'over_50_px_on_accepted': over_threshold, 'rejected_images': rejected,
+                        'failed_with_rejections': over_threshold + rejected}
 
             dropped = [row for row in rows if row[before]['valid'] and not row[after]['valid']]
+            # Use a common denominator derived independently of the fit outcome.
+            eligible = [row for row in rows if len(row['annotation']['unobserved_visible_ids']) >= 3]
             summary['rejected_baseline'] = {
                 'label_px': distribution(errors([row[before] for row in dropped], 'label_px')),
                 'unobserved_label_px': distribution(errors([row[before] for row in dropped],
                                                                'unobserved_label_px')),
-                'gross_errors': gross_errors(before, dropped),
+                'gross_errors': gross_errors(
+                    before, [row for row in eligible if row[before]['valid'] and not row[after]['valid']]),
             }
             for name in variants:
-                summary[name]['gross_errors'] = gross_errors(name, rows)
+                summary[name]['gross_errors'] = gross_errors(name, eligible)
     return summary
 
 
@@ -296,8 +301,11 @@ def video_rows(args, detector, pair, decoding):
 
 def video_overlays(path, output, rows, markings, variants=VARIANTS, include=()):
     """Save a regular sample plus disagreements, sparse fits and cut neighborhoods."""
+    missing = sorted(set(include) - {row['id'] for row in rows})
+    if missing:
+        raise ValueError(f'Requested overlay frames were not decoded: {missing}')
     selected = set(np.linspace(0, len(rows) - 1, min(12, len(rows)), dtype=int))
-    selected.update(index for index in include if 0 <= index < len(rows))
+    selected.update(include)
     baseline, candidate = variants
     for before, after in [(True, False), (False, True), (True, True), (False, False)]:
         choices = [row['id'] for row in rows if row[baseline]['valid'] == before
@@ -362,6 +370,8 @@ def main():
         parser.error('--reliability is available only for development inputs')
     if args.overlay_frame and (args.mode != 'video' or min(args.overlay_frame) < 0):
         parser.error('--overlay-frame requires a nonnegative video frame index')
+    if args.overlay_frame and args.stop_before is not None and max(args.overlay_frame) >= args.stop_before:
+        parser.error('--overlay-frame must be less than --stop-before')
 
     # Configure local Ultralytics paths before loading the same model as the runner.
     from pitchlens.detector import Detector  # noqa: F401
