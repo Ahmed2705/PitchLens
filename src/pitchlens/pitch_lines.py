@@ -104,6 +104,18 @@ class PitchLineCheck:
             # Samples remain ordered along each projected line.
             return len(selected) >= 2 and np.linalg.norm(selected[-1] - selected[0]) >= 24 * scale
 
+        def continues_past_boundary(distances: np.ndarray) -> bool:
+            # Positive distances extend out of the shared ridge. Begin on
+            # the ridge and allow small sampling gaps along the same stripe.
+            max_gap = 8 * scale
+            distances = np.sort(distances[distances >= -max_gap])
+            if not len(distances) or distances[0] > 0:
+                return False
+            gaps = np.flatnonzero(np.diff(distances) > max_gap)
+            connected = distances[:gaps[0] + 1] if len(gaps) else distances
+            beyond = connected[connected > 0]
+            return len(beyond) >= 4 and beyond[-1] - beyond[0] >= 24 * scale
+
         # An isolated player or logo can create a bright peak. A parallel offset
         # repeated along a line is evidence against the projected position.
         visible_segments = None
@@ -136,11 +148,8 @@ class PitchLineCheck:
                     near = near_segments(locations, segment, margin)
                     if not near.any():
                         continue
-                    other = points[(ids == neighbor) & aligned]
-                    along = other @ tangent
-                    before = other[along < lower]
-                    after = other[along > upper]
-                    if any(len(part) >= 4 and spans_marking(part) for part in (before, after)):
+                    along = points[(ids == neighbor) & aligned] @ tangent
+                    if continues_past_boundary(lower - along) or continues_past_boundary(along - upper):
                         aliases |= near
                 unexplained = hits[~aliases]
                 if len(unexplained) >= minimum and spans_marking(points[unexplained]):

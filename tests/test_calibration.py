@@ -100,6 +100,12 @@ class PitchCalibrationTests(unittest.TestCase):
         shifted[:, 1] += 11
         self.assertEqual(self.calibrator.update(shifted, frame.shape, frame=frame).reason,
                          'contradictory_paint')
+        # Detached paint raises both neighboring marks' support without
+        # extending either shared ridge.
+        cv2.line(frame, (166, 245), (223, 245), (220, 225, 220), 1)
+        cv2.line(frame, (764, 245), (822, 245), (220, 225, 220), 1)
+        self.assertEqual(self.calibrator.update(shifted, frame.shape, frame=frame).reason,
+                         'contradictory_paint')
 
     def test_recovers_contact_despite_outlier(self):
         points = self.observe()
