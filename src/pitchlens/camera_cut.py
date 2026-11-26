@@ -28,6 +28,19 @@ def _similar_view(before: np.ndarray, after: np.ndarray, min_correlation: float)
     return bool(scale > 0 and np.dot(x, y) >= min_correlation * scale)
 
 
+def _localized_change(difference: np.ndarray, gray_before: np.ndarray) -> bool:
+    # An overlay can dominate global differences. Require most of the picture
+    # to remain close and require textured agreement across multiple quadrants.
+    height, width = gray_before.shape
+    grid = (10, height // 10, 10, width // 10)
+    unchanged = difference.reshape(*grid, 3).mean(axis=(1, 3, 4)) <= .02 * 255
+    if unchanged.mean() < .75:
+        return False
+    textured = gray_before.reshape(grid).std(axis=(1, 3)) >= _MIN_LUMA_STD
+    quadrant_support = (unchanged & textured).reshape(2, 5, 2, 5).sum(axis=(1, 3))
+    return np.count_nonzero(quadrant_support >= 3) >= 3
+
+
 def _continuous_motion(before: np.ndarray, after: np.ndarray, gray_before: np.ndarray,
                        gray_after: np.ndarray) -> bool:
     # Fit one translation, rotation and scale from reversible feature tracks.
@@ -60,21 +73,28 @@ def _continuous_motion(before: np.ndarray, after: np.ndarray, gray_before: np.nd
 def _continuous_translation(before: np.ndarray, after: np.ndarray, gray_before: np.ndarray,
                             gray_after: np.ndarray, change: float) -> bool:
     # A view of grass and straight field markings may have no trackable corners.
-    # Match the center by translation, then check the full shared area.
+    # Match the center or an edge by translation, then check the full shared area.
     height, width = gray_before.shape
     margin_x, margin_y = width // 5, height // 5
-    center = gray_before[margin_y:-margin_y, margin_x:-margin_x]
-    if center.std() < _MIN_LUMA_STD:
-        return False
-    correlation = cv2.matchTemplate(gray_after, center, cv2.TM_CCOEFF_NORMED)
-    _, _, _, (x, y) = cv2.minMaxLoc(correlation)
-    dx, dy = x - margin_x, y - margin_y
-    tx, ty = max(0, dx), max(0, dy)
-    sx, sy = max(0, -dx), max(0, -dy)
-    w, h = width - abs(dx), height - abs(dy)
-    aligned, current = before[sy:sy+h, sx:sx+w], after[ty:ty+h, tx:tx+w]
-    return (cv2.absdiff(aligned, current).mean() / 255 <= .55 * change
-            and _similar_view(aligned, current, .85))
+    template_width, template_height = width - 2 * margin_x, height - 2 * margin_y
+    for x, y in ((margin_x, margin_y), (margin_x, 0), (margin_x, 2 * margin_y),
+                 (0, margin_y), (2 * margin_x, margin_y)):
+        template = gray_before[y:y+template_height, x:x+template_width]
+        if template.std() < _MIN_LUMA_STD:
+            continue
+        left, top = max(0, x - margin_x), max(0, y - margin_y)
+        search = gray_after[top:y+template_height+margin_y, left:x+template_width+margin_x]
+        correlation = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
+        _, _, _, (match_x, match_y) = cv2.minMaxLoc(correlation)
+        dx, dy = left + match_x - x, top + match_y - y
+        tx, ty = max(0, dx), max(0, dy)
+        sx, sy = max(0, -dx), max(0, -dy)
+        w, h = width - abs(dx), height - abs(dy)
+        aligned, current = before[sy:sy+h, sx:sx+w], after[ty:ty+h, tx:tx+w]
+        if (cv2.absdiff(aligned, current).mean() / 255 <= .55 * change
+                and _similar_view(aligned, current, .85)):
+            return True
+    return False
 
 
 def is_hard_cut(before: np.ndarray, after: np.ndarray, *, appearance_threshold: float,
@@ -82,14 +102,17 @@ def is_hard_cut(before: np.ndarray, after: np.ndarray, *, appearance_threshold: 
     """Separate abrupt appearance changes from shared scene structure and motion."""
     if low_detail_threshold == 1:
         return False
-    change = cv2.absdiff(before, after).mean() / 255
+    difference = cv2.absdiff(before, after)
+    change = difference.mean() / 255
     if change <= min(appearance_threshold, low_detail_threshold):
         return False
     gray_before, gray_after = (cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) for frame in (before, after))
     if max(gray_before.std(), gray_after.std()) < _MIN_LUMA_STD:
         # No spatial evidence is available to distinguish exposure from a new shot.
         return bool(change > low_detail_threshold)
-    if change <= appearance_threshold or _similar_view(before, after, .94):
+    if (change <= appearance_threshold or _similar_view(before, after, .94)
+            or _localized_change(difference, gray_before)):
         return False
     return not (_continuous_motion(before, after, gray_before, gray_after)
-                or _continuous_translation(before, after, gray_before, gray_after, change))
+                or _continuous_translation(before, after, gray_before, gray_after, change)
+                or _continuous_translation(after, before, gray_after, gray_before, change))
