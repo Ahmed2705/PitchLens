@@ -128,7 +128,8 @@ class PitchCalibrator:
 
     def update(self, observations: np.ndarray | None, shape: tuple[int, ...],
                camera_cut: bool = False) -> Calibration:
-        previous, self.previous = self.previous, None
+        previous = None if camera_cut else self.previous
+        self.previous = None
         height, width = shape[:2]
         frame_size = (width, height)
         diagonal = math.hypot(width, height)
@@ -194,7 +195,7 @@ class PitchCalibrator:
         if result is None:
             return Calibration(config, frame_size, candidates=count, inliers=inliers, reason='unreliable_geometry')
         stabilized = False
-        if previous is not None and not camera_cut and config.smoothing:
+        if previous is not None and config.smoothing:
             current = project(matrix, world)
             prior = project(previous, world)
             if np.all(np.linalg.norm(prior - current, axis=1) <= 2 * threshold):

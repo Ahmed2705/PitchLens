@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 import math
 
-import cv2
 import numpy as np
+from pitchlens.camera_cut import is_hard_cut, thumbnail
 from pitchlens.detector import Detection  # Configure Ultralytics before importing its tracking modules.
 from ultralytics.engine.results import Boxes
 from ultralytics.trackers.byte_tracker import BYTETracker
@@ -40,7 +40,7 @@ class TrackingConfig:
 
 @dataclass(frozen=True)
 class Track:
-    """A current track. Person IDs are scoped to (segment, class); ball ID is None."""
+    """A current track. Person IDs are class-scoped and disjoint across cuts within a video."""
     xyxy: tuple[float, float, float, float]
     class_id: int
     track_id: int | None
@@ -84,6 +84,8 @@ class Tracker:
     def reset(self):
         self.segment = 0
         self.frame_index = 0
+        self.track_id_offset = 0
+        self.largest_track_id = 0
         self.previous = None
         self.shape = None
         self._reset_segment()
@@ -97,10 +99,11 @@ class Tracker:
         for d in detections:
             if not isinstance(d, Detection) or isinstance(d.class_id, bool) or d.class_id not in range(4) or not math.isfinite(d.confidence) or not 0 <= d.confidence <= 1 or len(d.xyxy) != 4 or not all(math.isfinite(x) for x in d.xyxy) or not (0 <= d.xyxy[0] < d.xyxy[2] <= w and 0 <= d.xyxy[1] < d.xyxy[3] <= h):
                 raise ValueError('invalid detection')
-        small = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (64, 36), interpolation=cv2.INTER_AREA)
-        cut = self.previous is not None and np.mean(cv2.absdiff(small, self.previous)) / 255 > self.config.cut_threshold
+        small = thumbnail(frame)
+        cut = self.previous is not None and is_hard_cut(self.previous, small, self.config.cut_threshold)
         if cut:
             self.segment += 1
+            self.track_id_offset = self.largest_track_id
             self._reset_segment()
         self.previous = small
         self.shape = frame.shape
@@ -113,7 +116,9 @@ class Tracker:
                 xyxy = (max(0., min(float(x1), w)), max(0., min(float(y1), h)),
                         max(0., min(float(x2), w)), max(0., min(float(y2), h)))
                 if xyxy[2] > xyxy[0] and xyxy[3] > xyxy[1]:
-                    result.append(Track(xyxy, cls, int(row[4]), float(row[5]), True))
+                    track_id = self.track_id_offset + int(row[4])
+                    self.largest_track_id = max(self.largest_track_id, track_id)
+                    result.append(Track(xyxy, cls, track_id, float(row[5]), True))
         ball = self._update_ball([d for d in detections if d.class_id == 3 and d.confidence >= self.config.ball_confidence], w, h)
         if ball is not None:
             result.append(ball)
