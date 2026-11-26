@@ -22,6 +22,8 @@ def main():
     p.add_argument('--team-config', type=Path, default=None)
     p.add_argument('--team-references', type=Path, help='JSON mapping team 1 and 2 to paths of labeled crop images')
     p.add_argument('--siglip-snapshot', type=Path, help='Local pretrained SigLIP snapshot directory')
+    p.add_argument('--pitch-weights', type=Path, help='Verified local Roboflow v9 pitch checkpoint for evaluation')
+    p.add_argument('--pitch-config', type=Path, help='JSON overrides for the pitch dimensions and fit thresholds')
     p.add_argument('--device', choices=('auto', 'cpu', 'cuda'), default='auto')
     p.add_argument('--max-frames', type=int, default=None, help='Optional limit for a short smoke check')
     args = p.parse_args()
@@ -31,6 +33,8 @@ def main():
         p.error('--max-frames must be positive')
     if args.team_references and args.team_config:
         p.error('--team-config applies only to automatic mode')
+    if args.pitch_config and not args.pitch_weights:
+        p.error('--pitch-config requires --pitch-weights')
     if args.output.suffix.lower() != '.mp4':
         p.error('--output must be an MP4 path')
     paths = [args.output, args.output.with_suffix('.jsonl'), args.output.with_suffix('.json')]
@@ -77,6 +81,20 @@ def main():
                 settings.update(json.loads(args.team_config.read_text(encoding='utf-8-sig')))
             team_config = TeamConfig(**settings)
             teams = TeamClassifier(team_config)
+        if args.pitch_weights:
+            from pitchlens.calibration import PitchCalibrator, PitchConfig
+            from pitchlens.pitch_landmarks import CHECKPOINT_SHA256, PitchLandmarkDetector
+            from pitchlens.pitch_minimap import PitchMinimap
+
+            overrides = json.loads(args.pitch_config.read_text(encoding='utf-8-sig')) if args.pitch_config else {}
+            if not isinstance(overrides, dict):
+                raise ValueError('Pitch configuration must be a JSON object')
+            pitch = PitchConfig(**overrides)
+            landmark_detector = PitchLandmarkDetector(args.pitch_weights, detector.device)
+            calibrator = PitchCalibrator(pitch)
+            minimap = PitchMinimap(pitch, (height, width))
+            pitch_frames = 0
+            pitch_counts = dict.fromkeys(('valid', 'estimated', 'unavailable'), 0)
         # Reserve the output name atomically before OpenCV opens it for writing.
         with args.output.open('xb'):
             pass
@@ -95,6 +113,16 @@ def main():
                 record = asdict(tracked)
                 for item, team in zip(record['tracks'], assignments):
                     item['team'] = team
+                if args.pitch_weights:
+                    calibration = calibrator.update(landmark_detector.detect(frame), frame.shape, tracked.camera_cut)
+                    metadata = calibration.metadata()
+                    record['calibration'] = metadata
+                    pitch_frames += metadata['valid']
+                    for item in record['tracks']:
+                        if item['class_id'] in (0, 1):
+                            item['pitch'] = calibration.map_contact(item['xyxy'])
+                            pitch_counts[item['pitch']['status']] += 1
+                    minimap.draw(frame, record['tracks'], metadata['valid'])
                 records.write(json.dumps(record, allow_nan=False) + '\n')
                 cuts += tracked.camera_cut
                 for item, team in zip(tracked.tracks, assignments):
@@ -122,6 +150,9 @@ def main():
                    'elapsed_seconds': elapsed, 'processing_fps': frames / elapsed, 'camera_cuts': cuts,
                    'ball_observed_frames': observed, 'ball_predicted_frames': predicted, 'device': detector.device,
                    'image_size': detector.image_size, 'config': asdict(config), 'team_config': asdict(teams.config), 'team_mode': 'assisted' if args.team_references else 'automatic', 'team_references': str(args.team_references) if args.team_references else None, 'siglip_snapshot': str(args.siglip_snapshot) if args.siglip_snapshot else None}
+        if args.pitch_weights:
+            summary['pitch'] = {'checkpoint_sha256': CHECKPOINT_SHA256, 'config': asdict(pitch),
+                                'valid_frames': pitch_frames, 'coordinates': pitch_counts}
         with paths[2].open('x', encoding='utf-8') as file:
             json.dump(summary, file, indent=2, allow_nan=False)
         print(json.dumps(summary, indent=2))

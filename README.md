@@ -84,4 +84,4 @@ python -m pip check
 
 ## Development approach
 
-Experimental team classification is implemented; Feature #04 camera calibration and 2D pitch mapping is authorized but not yet implemented. See [tracking usage and limitations](docs/TRACKING.md). The project prioritizes accuracy, reliability, and reproducibility, including documented dataset splits and experiment settings. Decisions are recorded in the [technical decision record](docs/DECISIONS.md), and the detection data workflow is in [DETECTION.md](docs/DETECTION.md).
+Experimental team classification is implemented. Feature #04 adds opt-in camera calibration and 2D pitch mapping for local evaluation. See the [calibration guide](docs/CALIBRATION.md) and [tracking usage and limitations](docs/TRACKING.md). The project prioritizes accuracy, reliability, and reproducibility, including documented dataset splits and experiment settings. Decisions are recorded in the [technical decision record](docs/DECISIONS.md), and the detection data workflow is in [DETECTION.md](docs/DETECTION.md).

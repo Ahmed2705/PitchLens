@@ -2,6 +2,12 @@
 
 PitchLens has an accepted object detection baseline and a tracking implementation tested on two unlabelled videos. Ground-truth tracking evaluation remains outstanding.
 
+## Feature #04: camera calibration and 2D pitch mapping
+
+- Implemented and verified an opt-in local evaluation baseline for dynamic metric pitch mapping with a top-down minimap and frame-level diagnostics. The official pose checkpoint was benchmarked on both clips before integration. Its exact license terms remain unresolved, so its use is restricted to local evaluation.
+- End-to-end CUDA runs accepted 591 of 928 desktop frames and 49 of 390 U19 frames. Absolute mapping accuracy is unmeasured and U19 coverage is low. Goalkeeper affiliation remains unknown. See the [calibration guide](CALIBRATION.md#local-evaluation) for metrics, assumptions, and artifact locations.
+- The complete suite passed 59 tests after resolving six independent GPT-6.2 Sol review findings covering degeneracy, checkpoint snapshot verification, clipped landmarks and contacts, numerical bounds, and annotation layering.
+
 ## Initial video check
 
 - Processed the supplied Inter–Ajax U19 WebM with the existing checkpoint, CUDA, 960-pixel input and confidence 0.25. The 1280 × 720 source and generated MP4 each decoded to 390 frames at 24 FPS; source metadata reported 391 frames. Processing took 13.89 seconds (28.08 FPS including decoding, inference, drawing and encoding). The MP4 has no audio track.

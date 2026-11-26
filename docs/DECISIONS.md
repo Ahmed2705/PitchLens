@@ -84,3 +84,7 @@ Use torso LAB color and deterministic two-means on bounded, smoothed per-track s
 ## Assisted team initialization
 
 When a user supplies labeled player-crop examples for both teams, use an offline local SigLIP vision model and per-track embedding aggregation. The examples define team labels for that video; the automatic LAB mode remains separately available because automatic cluster numbers cannot be safely mapped to user-defined team labels without evidence. Low-similarity and low-margin predictions remain unknown. Goalkeeper affiliation remains unimplemented; Feature #04 is now authorized. This is a baseline subject to tracking errors and uncalibrated confidence thresholds.
+
+## Feature #04: local evaluation of pitch mapping
+
+Use the official Roboflow v9 pose checkpoint with the existing Ultralytics environment and a per-frame OpenCV homography. Fit in image space to express residuals in pixels. Require current evidence on every frame and reset history at cuts. Use configurable metric field geometry and distinguish interpolation from bounded extrapolation and unavailable points. Preserve the existing detector, tracker, team classifier and default runner behavior. Keep goalkeeper affiliation unknown until there is reliable evidence linking the defending end to a team. Restrict the checkpoint to local evaluation pending clarification of the exact artifact license. See [calibration setup and assumptions](CALIBRATION.md).
