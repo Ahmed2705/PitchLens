@@ -1,0 +1,21 @@
+{
+  "frozen_manifest_sha256": "8956d964241750a966ef60cefa7d03c8cb9902b780e47ec76c989ff10c4204f3",
+  "frozen_weights_sha256": "29135b3b60a241f006f88f042db57b7c60ad3c7f161454683338eea01cb4b94b",
+  "wrkplace_groups": {
+    "2015-02-21-18-00Chelsea1-1Burnley": "train",
+    "2015-02-21-18-00CrystalPalace1-2Arsenal": "test",
+    "Full-Match-PERSIJA_Jakarta_VS_PSS_Sleman": "val"
+  },
+  "wrkplace_min_players": 8,
+  "wrkplace_reviewed_aliases": {
+    "4dae79a9_0": "legacy/121364",
+    "4dae79a9": "legacy/2e57b9"
+  },
+  "wrkplace_train_cap_per_clip": 60,
+  "wrkplace_camera_exclusions": {
+    "2015-02-21-18-00Chelsea1-1Burnley1_720p": [4320, 26400],
+    "2015-02-21-18-00Chelsea1-1Burnley2_720p": [120, 19080, 22200, 49800],
+    "2015-02-21-18-00CrystalPalace1-2Arsenal1_720p": [120, 24720, 44880],
+    "Full-Match-PERSIJA_Jakarta_VS_PSS_Sleman": [12600, 12660]
+  }
+}

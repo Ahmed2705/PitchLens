@@ -67,7 +67,7 @@ Optional future features are tracked separately in [PROGRESS.md](PROGRESS.md#opt
 
 ## Foundation Reliability dataset audit
 
-The developer supplied and authorized auditing three additional detection exports, the Roboflow field-landmark v18 export and the complete SoccerNet Calibration 2023 validation archive. The dataset audit has its own output directory under external storage at `outputs/dataset-audit-v1`. Keep SoccerNet validation isolated from training and model selection. Dataset selection, split changes and retraining are pending architectural review.
+The developer supplied and authorized auditing three additional detection exports, the Roboflow field-landmark v18 export and the complete SoccerNet Calibration 2023 validation archive. The dataset audit has its own output directory under external storage at `outputs/dataset-audit-v1`. Keep SoccerNet validation isolated from training and model selection. The approved detection candidate retains Players v10, compatible Objects v1 crops and screened new Wrkplace broadcasts. IFAP is reserved for domain evaluation and Football Player Referee and Goalkeeper is excluded. The [candidate checkpoint](DETECTION_CANDIDATE_V1.md) records its split reservation and development baseline. Retraining requires architectural review and authorization.
 
 ## Preliminary recommendations
 

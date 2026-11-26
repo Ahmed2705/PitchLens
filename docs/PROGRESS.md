@@ -7,7 +7,7 @@ PitchLens has an accepted object detection baseline and a tracking implementatio
 - Audited five detection exports and two calibration exports. All seven archive CRC checks passed. The five newly supplied archives were extracted to the approved external storage folders and their files were verified against the ZIP entries.
 - The seven ZIPs use 926,862,224 bytes of the 2,500,000,000-byte cumulative dataset limit, leaving 1,573,137,776 bytes. The cap excludes pretrained weights.
 - The published object detection splits share source groups. The Football Player Referee and Goalkeeper export also shares 261 source frame IDs with Football Players Detection v10. Roboflow field v18 is suitable for calibration diagnostics pending review. SoccerNet Calibration 2023 validation is reserved for evaluation.
-- Detailed reports, per-image evidence and reproducible checks are in `E:\PitchLensStorage\outputs\dataset-audit-v1`. Dataset selection, partitioning and retraining await architectural review.
+- Detailed reports, per-image evidence and reproducible checks are in `E:\PitchLensStorage\outputs\dataset-audit-v1`. [Detection candidate v1](DETECTION_CANDIDATE_V1.md) records the curated split and frozen-checkpoint evaluation. Training awaits architectural review.
 
 ## Feature #04: camera calibration and 2D pitch mapping
 
