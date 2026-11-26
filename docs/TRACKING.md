@@ -28,6 +28,8 @@ The Foundation audit replay covered eight existing review strips with 201 distin
 
 The full 928-frame EGYPT CUDA replay used the unchanged production detector and pitch checkpoint. It reproduced every archived JSONL record before frame 925. The new segment emitted neither a ball extrapolation nor pitch coordinates on frames 925–927. The verified `EGYPT-verified.mp4`, its JSONL and the artifact verification record are under `runs/camera-cut-v1`. The cut-only recheck after the final review fixes is recorded in `outputs/camera-cut-v1-reviewed-audit.log`.
 
+All 106 project tests passed, including 11 camera-cut tests and a runner-level check of the coordinated resets. GPT-6.2 Sol reviews prompted fixes for sparse and fractional pans, cut sensitivity, broadcast graphics, and misleading overlap on repetitive pitch detail. The final read-only follow-up on `a226d34` independently passed four targeted tests and cleared the two remaining blocking findings. The model and verdict are recorded in `outputs/camera-cut-v1-sol-remediation.log` (session `01a21933-76a2-7002-aed1-d55f28a11372`).
+
 ## Team classification (experimental)
 
 The video runner includes segment-local team assignments. `--team-config` optionally points to a JSON object overriding the defaults in `configs/team_classification.json`. Each JSONL track has `team` 1, 2, or null (unknown). Team numbers are arbitrary and may change across cuts or videos. Boxes are blue for team 1, magenta for team 2, and grey for unknown players and goalkeepers. Referees and balls have null team values. The model weights and tracker are unchanged.
