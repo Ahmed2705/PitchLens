@@ -80,6 +80,8 @@ One v9 inference per image or frame supplied identical observations to both vari
 | Roboflow projected error for visible IDs missing from candidate input, p50 / p90, common accepted images (px) | 153.83 / 289.34 | 151.24 / 284.07 |
 | Desktop/Egypt fits from v9 predictions | 591 / 928 (63.7%) | 829 / 928 (89.3%) |
 | Desktop/Egypt inlier RMSE, p50 / p90 (px) | 3.10 / 4.21 | 3.23 / 4.40 |
+| Inter–Ajax U19 fits from v9 predictions | 49 / 390 (12.6%) | 162 / 390 (41.5%) |
+| Inter–Ajax U19 inlier RMSE, p50 / p90 (px) | 2.31 / 2.96 | 2.25 / 2.97 |
 
 Roboflow's common-acceptance comparison uses 115 images and 1,824 visible labels, including 470 without a candidate prediction. Both transforms project the same physical check coordinates. Direct v9-to-label distance was 46.45 px at p50 and 100.29 px at p90 for 3,352 candidate predictions matched by ID among 4,802 visible labels. Labels with visibility 0 or 1 are excluded. The large direct errors identify a landmark-prediction problem before fitting. The resized v18 export and checkpoint share lineage, so the result is diagnostic and the effect of square stretching is unmeasured.
 
@@ -87,12 +89,14 @@ Roboflow's common-acceptance comparison uses 115 images and 1,824 visible labels
 - Desktop frame 505 accepts both fits with eight inliers. The corrected projection drifts off the painted halfway line more visibly than the original. Frame 540 is newly accepted with an inlier RMSE of 3.76 px; the projected halfway line and circle miss the markings while most support lies to the right. Frame 623 passes with six of eight candidates and visibly misplaces the penalty box. These whole-pitch overlays diagnose the transform. The production mapper separately restricts player contacts to the inlier hull and its extrapolation margin.
 - Replaying frames 505, 540 and 623 without smoothing reproduced the visible errors. At frame 623 the corrected support covered only 2.66% of the image, with six inliers from one end. In v18 frame `121364_4_3`, the median direct prediction error was 90.04 px across 13 visible matches, while feeding the visible annotations themselves yielded a 1.21 px inlier residual. Together these tests identify two failure modes: displaced input landmarks and a fit that follows local support but misprojects other markings.
 - The corrected desktop fit rejected 92 frames for too few inliers and seven for too few candidates. At frame 914 both variants had seven candidates, but only four or five inliers. At the cut to a close-up on frame 925, there were just two candidates and both rejected. This distinguishes inconsistent correspondences from frames without enough candidate landmarks. Of the changes in acceptance, 245 frames gained a fit and seven lost one. The footage has no independent player or landmark labels, so coverage and visual examples cannot establish a change in metric accuracy.
-- The desktop file is byte-identical to the original EGYPT audit input (SHA-256 `879b7996768f595afb7d3e17197409256fba2d1ada84d2e71b5c8637c80c6bc6`). It was the available raw clip in the project and configured external storage. U19 and the other audit views were only available as previously annotated outputs or reports, so their original pixels were unavailable for a comparable run. The reserved LIV interval was left unopened.
+- U19 gained a fit on 116 frames and lost one on three. In frame 106 the corrected fit accepts seven of ten candidates, but the projected box edge diverges from the painted line near the shadow. In frame 176 a spectator obscures the field and neither variant receives a pitch instance. Across the clip, the detector did not return exactly one pitch on 200 frames. One further frame had too few candidates, and 27 corrected fits had too few inliers. The shared tracker signaled six resets amid occlusions and view changes. Both variants processed the same 390 decoded frames. OpenCV reported 391, so the summary flags the mismatch.
+- The desktop file is byte-identical to the original EGYPT audit input (SHA-256 `879b7996768f595afb7d3e17197409256fba2d1ada84d2e71b5c8637c80c6bc6`). The original U19 WebM survives in the retained Downloads files (SHA-256 `e446b7d911638e6d8a2c69ad4a6a64c154fe291ba1d8fb3053d5fa00aac4a58b`). The other audit views were available as previously annotated outputs or reports. The reserved LIV interval was left unopened.
 
 Reproduce the development comparisons from the project root with the checkpoint environment flags above. Each command requires a new output directory and writes per-frame predictions, paired fit metadata, and a summary. Video records both the reported and decoded frame counts, flags a mismatch or unknown count, and writes selected paired overlays with predictions in yellow and projected ground markings in blue.
 
 ```powershell
 $storage = 'E:\PitchLensStorage'
+$downloads = 'C:\Users\Ahmad\Downloads'
 $audit = "$storage\outputs\dataset-audit-v1"
 $weights = "$storage\models\football-pitch-detection-v9.pt"
 .\.venv\Scripts\python.exe -m scripts.evaluate_calibration roboflow `
@@ -102,21 +106,26 @@ $weights = "$storage\models\football-pitch-detection-v9.pt"
 .\.venv\Scripts\python.exe -m scripts.evaluate_calibration video `
   --input "$storage\footage\Desktop 2026.11.25 - 15.59.30.02.mp4" `
   --weights $weights --output outputs/calibration-desktop-new
+.\.venv\Scripts\python.exe -m scripts.evaluate_calibration video `
+  --input "$downloads\Next_Generation._U19._Inter_vs_Ajax._Ajax_goal..webm" `
+  --weights $weights --output outputs/calibration-u19-new
 ```
 
-The measured summaries are in `outputs/calibration-reliability-v1-roboflow-canonical` and `outputs/calibration-reliability-v1-desktop`. The three Roboflow inspection overlays are in `outputs/calibration-reliability-v1-roboflow`.
+The measured summaries are in `outputs/calibration-reliability-v1-roboflow-canonical`, `outputs/calibration-reliability-v1-desktop-verified`, and `outputs/calibration-reliability-v1-u19`. The Roboflow inspection overlays are in `outputs/calibration-reliability-v1-roboflow` and the desktop smoothing replay is in `outputs/calibration-reliability-v1-desktop/static-checks.jpg`.
 
 ## Reserved SoccerNet evaluation
 
-The protocol and scorer are ready for architectural review. SoccerNet predictions and scores were left uncomputed. The audit and extracted match index agree on 3,212 images from 55 matches, including both official rows `01463.jpg` and `01464.jpg`. The scoring command requires the original local `valid.zip` used in the audit. It reads pixels, labels and match metadata directly from that archive after checking the publisher SHA-256. The extracted files are available in the configured storage, but the original ZIP was unavailable there during this pass. Keep the partition outside training, threshold selection, model selection and calibration changes. The full v9 training inventory is unavailable. [SoccerNet annotations and challenge evaluation](https://github.com/SoccerNet/sn-calibration#evaluation)
+The protocol and scorer are ready for architectural review. SoccerNet predictions and scores were left uncomputed. The retained local `valid.zip` matched publisher SHA-256 `9b8846782e16297a64a9f4c8e3b5bf32cfa62037dc735be79e168ada3aac0aa4`. Its index and member paths agree on 3,212 image–label pairs from 55 matches, including both official rows `01463.jpg` and `01464.jpg`. The scorer reads pixels, labels and match metadata directly from the verified archive. Keep the partition outside training, threshold selection, model selection and calibration changes. The full v9 training inventory is unavailable. [SoccerNet annotations and challenge evaluation](https://github.com/SoccerNet/sn-calibration#evaluation)
 
 - Score one image at a time with independent state, the same predictions per variant and the same physical 105 × 68 m geometry for scoring. Use ground-plane markings by semantic name. Do not derive landmark coordinates from clipped line endpoints. Exclude elevated and unknown classes. Drop nonfinite points and overflow beyond 1 native pixel, clamp smaller overflow, and deduplicate samples within each marking. A single usable point can score an existing fit. Record exclusions and retained support per image.
 - Project visible segments in native 960 × 540 coordinates. Sample the center circle every degree and each penalty arc at 111 angles including both endpoints. Clip to the camera-facing viewport. Measure each annotation point's Euclidean distance to the nearest point on the projected marking of the same name. Test both global pitch orientations (0° and 180°), choose the one with more points within 5 px, then lower summed distance. A marking without visible projected segments counts as a miss. Report null for a quantile that falls among failed projections.
 - Report accepted coverage and p50/p90 pixels, including the common accepted subset. Report the fraction within 5 px both among accepted fits and across all eligible points, counting fit rejection as a miss in the latter. Keep per-match summaries and event identifiers. For uncertainty in a later report, resample complete matches with replacement, using the same draws for both templates, to avoid treating repeated event frames as independent. This measures planar image alignment. The official SoccerNet 3D camera format and completeness × JaC@5 score require a camera model with elevated goal geometry.
 
 ```powershell
-$soccerNetArchive = 'X:\path\to\existing\valid.zip'
+$soccerNetArchive = "$downloads\valid.zip"
 .\.venv\Scripts\python.exe -m scripts.evaluate_calibration soccernet `
   --input $soccerNetArchive --weights $weights `
   --output outputs/calibration-soccernet-new
 ```
+
+The full local suite passed 117 tests. Independent GPT-6.2 Sol review of `622165c` found two issues in the evaluator, concerning the provenance of SoccerNet labels and metadata and the handling of short video decodes. Follow-up reviews verified those fixes in `6078f1c` and the explicit frame-limit failure behavior in `5ab56c7`. The final review passed all 21 targeted tests (session `01a21944-9c04-72d3-8ca7-f1e5cc96b5eb`).
