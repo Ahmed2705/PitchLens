@@ -11,6 +11,8 @@ The license statements above are from the dataset exports; rights to the underly
 
 Both export class mappings are verified against their metadata. The output mapping is `0: player`, `1: goalkeeper`, `2: referee`, `3: ball`. Goal polygons and corner boxes are removed. Images and boxes are validated, with sub-pixel edge overflows clipped only within a one-pixel tolerance. Conflicting retained-class labels on byte-identical images stop preparation.
 
+The Foundation Reliability audit covers both baseline exports plus Wrkplace, IFAP and Football Player Referee and Goalkeeper Detection. Its inventory and split recommendations are in `E:\PitchLensStorage\outputs\dataset-audit-v1`. The current cumulative dataset download cap is 2.5 GB excluding pretrained weights. The baseline uses the partition described below.
+
 ## Split and limitations
 
 SHA-256 identifies exact duplicates; a 64-bit DCT perceptual hash flags similar images. The filename prefix groups related sequences and crops across both exports. A visual stadium review prompted conservative grouping of the 15 prefixes into six stadium groups in [the source configuration](../configs/detection_sources.json); cross-prefix perceptual-hash candidates are grouped as well. Stadium grouping is a precaution, not proof of original match identity; the source does not provide authoritative match IDs, so residual leakage remains possible.

@@ -45,8 +45,8 @@ Optional future features are tracked separately in [PROGRESS.md](PROGRESS.md#opt
 
 ## Approved detection dataset acquisition
 
-- Acquire and inspect only the two approved Roboflow Universe projects for YOLO26s detection on main-camera football broadcasts. [Football Players Detection](https://universe.roboflow.com/roboflow-jvuqo/football-players-detection-3zvbc) and [Football Object Detection](https://universe.roboflow.com/football-detect/football-object-detection).
-- Use free YOLO object detection exports with a combined download limit of 1 GB. Verify both archive sizes before downloading. Prefer non-augmented, original-resolution versions where available.
+- The original YOLO26s baseline acquisition covered two Roboflow Universe projects for main-camera football broadcasts. [Football Players Detection](https://universe.roboflow.com/roboflow-jvuqo/football-players-detection-3zvbc) and [Football Object Detection](https://universe.roboflow.com/football-detect/football-object-detection).
+- Use free datasets and verify archive sizes before acquisition. Prefer non-augmented, original-resolution versions where available. The current cumulative dataset limit is 2.5 GB (2,500,000,000 bytes), excluding pretrained model weights.
 - Preserve each export separately in the project's approved raw storage, including its images, annotations, metadata, class IDs, and source splits. The required final class mapping for a later preparation phase is `0: player`, `1: goalkeeper`, `2: referee`, `3: ball`.
 - The developer supplied the Football Players Detection v10 and Football Object Detection v1 archives. Their embedded Roboflow metadata identifies both as YOLO26 exports under CC BY 4.0. The v1 export includes provider-generated crop augmentation and polygon annotations for `goal`. [Version 10](https://universe.roboflow.com/roboflow-jvuqo/football-players-detection-3zvbc/dataset/10) and [version 1](https://universe.roboflow.com/football-detect/football-object-detection/dataset/1).
 - The approved local raw dataset directory is `E:\PitchLensStorage\datasets\raw`. Keep the raw storage location configurable for each machine. The two exports are stored separately in `football-players-detection-v10` and `football-object-detection-v1`, and the original ZIPs are retained in Windows Downloads.
@@ -54,7 +54,8 @@ Optional future features are tracked separately in [PROGRESS.md](PROGRESS.md#opt
 ## Delegated object detection implementation
 
 - The complete object detection feature is authorized through dataset preparation, leakage-aware splitting, training, evaluation, module implementation and verification. Authorization has since been extended through Feature #04 camera calibration and 2D pitch mapping.
-- Use local computation, a $0 project budget, a total dataset download limit of 1 GB, and the RTX 2060 SUPER with 8 GB VRAM as the primary hardware. Keep external storage paths configurable and never commit datasets, weights or generated experiments.
+- Use local computation, a $0 project budget, and the RTX 2060 SUPER with 8 GB VRAM as the primary hardware. Keep external storage paths configurable and never commit datasets, weights or generated experiments.
+
 - Prepare the approved exports with the mapping `0: player`, `1: goalkeeper`, `2: referee`, `3: ball`, removing goal and corner annotations. Preserve the raw exports. Target a reproducible 80/10/10 split while keeping known related frames and augmentations together and documenting provenance limits.
 - Train YOLO26s initialized from free pretrained `yolo26s.pt` at 640 pixels, with CUDA, AMP, automatic batch sizing and optimizer selection, at most 100 epochs, patience 20, and seed 42. Run a smoke test first; consider 960 or 1280 only when justified and feasible.
 - Treat the supplied performance targets as provisional. Never tune with the held-out test set; report measured results and limitations.
@@ -63,6 +64,10 @@ Optional future features are tracked separately in [PROGRESS.md](PROGRESS.md#opt
 - Two frames in the revised test group were inadvertently used to smoke-test an earlier checkpoint. Exclude those preselected frame IDs from final scoring; no model or threshold was selected from their predictions. The final dataset's training and validation images and labels were verified byte-for-byte identical to those used by the running baseline.
 - Earlier manifests hashed LF-normalized label text while Windows wrote CRLF files. Version 4 explicitly writes the existing CRLF label bytes and hashes those exact bytes; the final training and validation payloads remain byte-identical to the running baseline.
 - The model was trained at 640 pixels. Before final test evaluation, 640, 960 and 1280 pixel inference were compared on validation. The 960-pixel setting was selected for the detector default because it achieved the best overall validation metrics while improving ball recall and maintaining the provisional speed target. Use a 0.25 global confidence threshold for the documented final test.
+
+## Foundation Reliability dataset audit
+
+The developer supplied and authorized auditing three additional detection exports, the Roboflow field-landmark v18 export and the complete SoccerNet Calibration 2023 validation archive. The dataset audit has its own output directory under external storage at `outputs/dataset-audit-v1`. Keep SoccerNet validation isolated from training and model selection. Dataset selection, split changes and retraining are pending architectural review.
 
 ## Preliminary recommendations
 

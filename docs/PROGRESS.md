@@ -2,6 +2,13 @@
 
 PitchLens has an accepted object detection baseline and a tracking implementation tested on two unlabelled videos. Ground-truth tracking evaluation remains outstanding.
 
+## Foundation Reliability dataset audit
+
+- Audited five detection exports and two calibration exports. All seven archive CRC checks passed. The five newly supplied archives were extracted to the approved external storage folders and their files were verified against the ZIP entries.
+- The seven ZIPs use 926,862,224 bytes of the 2,500,000,000-byte cumulative dataset limit, leaving 1,573,137,776 bytes. The cap excludes pretrained weights.
+- The published object detection splits share source groups. The Football Player Referee and Goalkeeper export also shares 261 source frame IDs with Football Players Detection v10. Roboflow field v18 is suitable for calibration diagnostics pending review. SoccerNet Calibration 2023 validation is reserved for evaluation.
+- Detailed reports, per-image evidence and reproducible checks are in `E:\PitchLensStorage\outputs\dataset-audit-v1`. Dataset selection, partitioning and retraining await architectural review.
+
 ## Feature #04: camera calibration and 2D pitch mapping
 
 - Implemented and verified an opt-in local evaluation baseline for dynamic metric pitch mapping with a top-down minimap and frame-level diagnostics. The official pose checkpoint was benchmarked on both clips before integration. Its exact license terms remain unresolved, so its use is restricted to local evaluation.
@@ -17,7 +24,7 @@ PitchLens has an accepted object detection baseline and a tracking implementatio
 ## Delegated development workflow
 
 - The project owner authorized autonomous execution of the complete detection feature, including compatible free dependencies, dataset preparation, local training, testing, documentation, and verified milestone commits and pushes.
-- Work stays within the approved scope, $0 budget and 1 GB total dataset download limit. External data paths remain configurable; raw datasets, model weights and generated experiments remain outside Git.
+- Work stays within the approved scope and $0 budget. The current cumulative dataset download limit is 2.5 GB excluding pretrained model weights. External data paths remain configurable. Raw datasets, model weights and generated experiments remain outside Git.
 - The detection baseline is implemented and evaluated on frames, with material accuracy and dataset limitations documented below. Tracking and team classification were subsequently authorized; Feature #04 camera calibration and 2D pitch mapping is now authorized.
 
 ## Completed setup
@@ -58,7 +65,7 @@ PitchLens has an accepted object detection baseline and a tracking implementatio
 
 ## Detection dataset acquisition and inspection
 
-The two manually downloaded YOLO26 exports in Windows Downloads total 136,835,956 bytes, below the 1 GB limit. Both archives passed CRC validation, every image decoded successfully, and every image had a nonempty label file. No orphaned label files were found.
+The two manually downloaded YOLO26 exports in Windows Downloads total 136,835,956 bytes, below the original 1 GB limit at acquisition. Both archives passed CRC validation, every image decoded successfully, and every image had a nonempty label file. No orphaned label files were found.
 
 | Export | ZIP bytes | Extracted bytes | Extracted files | Train / validation / test | Image resolution |
 | --- | ---: | ---: | ---: | --- | --- |
