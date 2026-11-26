@@ -111,7 +111,8 @@ def average_precision(model: YOLO, frames: list[Frame], image_size: int, run: Pa
     run.mkdir()
     image_list = [str(path) for path in expected]
     data = frames[0].image.parent.parent / "data.yaml"
-    data.write_text(yaml.safe_dump({"train": image_list, "val": image_list,
+    # Ultralytics rejects YAML aliases, which PyYAML emits for a shared list.
+    data.write_text(yaml.safe_dump({"train": image_list, "val": image_list.copy(),
                                    "names": list(CLASS_NAMES)}), encoding="utf-8")
     if model.task != "detect" or model.names != dict(enumerate(CLASS_NAMES)):
         raise ValueError("AP checkpoint does not match the approved detection classes")

@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 import torch
 import yaml
+from ultralytics.utils import YAML
 
 from pitchlens.detection_manifest import label_for, sha256
 from pitchlens.detector import CLASS_NAMES, Detection
@@ -146,7 +147,8 @@ class ManifestEvaluationTests(unittest.TestCase):
             if change_source and not source_changed:
                 label_for(self.images[0]).write_bytes(b"3 0.6 0.5 0.2 0.2\n")
                 source_changed = True
-            config = yaml.safe_load(Path(data).read_text(encoding="utf-8"))
+            config = YAML.load(data)
+            self.assertEqual(config["train"], config["val"])
             validator = validator(args={**kwargs, "mode": "val", "data": data})
             validator.device = torch.device("cpu")
             validator.stride = 32
