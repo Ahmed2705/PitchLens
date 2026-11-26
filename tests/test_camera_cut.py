@@ -79,6 +79,29 @@ class CameraCutTests(unittest.TestCase):
         for a, b in ((before, after), (after, before)):
             self.assertFalse(is_hard_cut(a, b, **CUT_THRESHOLDS))
 
+    def test_mowing_stripes_do_not_hide_a_cut_with_different_scene_content(self):
+        before = np.full((90, 160, 3), (35, 145, 35), np.uint8)
+        for x in range(0, 160, 16):
+            before[:, x:x+8] = (38, 163, 38)
+        after = before.copy()
+        before[:27, :64] = 220
+        after[63:, 96:] = 220
+        for a, b in ((before, after), (after, before)):
+            self.assertTrue(is_hard_cut(a, b, **CUT_THRESHOLDS))
+
+    def test_matching_field_line_does_not_hide_conflicting_pitch_details(self):
+        before = np.full((90, 160, 3), (35, 145, 35), np.uint8)
+        after = np.full_like(before, (15, 140, 65))
+        before[:7] = 235
+        after[:17] = 235
+        after[:9] = (80, 25, 40)
+        before[:5, ::2] = 100
+        after[10:15, 1::2] = 100
+        before[50:58, 40:46] = (0, 0, 210)
+        after[62:70, 105:111] = (210, 0, 0)
+        for a, b in ((before, after), (after, before)):
+            self.assertTrue(is_hard_cut(a, b, **CUT_THRESHOLDS))
+
     def test_brighter_exposure_with_same_structure_stays_in_shot(self):
         before = scene(13)
         after = cv2.add(before, (48, 48, 48, 0))

@@ -36,8 +36,13 @@ def _localized_change(difference: np.ndarray, gray_before: np.ndarray) -> bool:
     unchanged = difference.reshape(*grid, 3).mean(axis=(1, 3, 4)) <= .02 * 255
     if unchanged.mean() < .75:
         return False
-    textured = gray_before.reshape(grid).std(axis=(1, 3)) >= _MIN_LUMA_STD
-    quadrant_support = (unchanged & textured).reshape(2, 5, 2, 5).sum(axis=(1, 3))
+    rows, columns = np.nonzero(~unchanged)
+    if rows.size == 0 or (np.ptp(rows) + 1) * (np.ptp(columns) + 1) > 30:
+        return False
+    # Repeated mowing stripes are not distinctive two-dimensional features.
+    corners = cv2.cornerMinEigenVal(gray_before, blockSize=5)
+    distinctive = corners.reshape(grid).max(axis=(1, 3)) >= .0001
+    quadrant_support = (unchanged & distinctive).reshape(2, 5, 2, 5).sum(axis=(1, 3))
     return np.count_nonzero(quadrant_support >= 3) >= 3
 
 
@@ -90,9 +95,24 @@ def _continuous_translation(before: np.ndarray, after: np.ndarray, gray_before: 
         tx, ty = max(0, dx), max(0, dy)
         sx, sy = max(0, -dx), max(0, -dy)
         w, h = width - abs(dx), height - abs(dy)
-        aligned, current = before[sy:sy+h, sx:sx+w], after[ty:ty+h, tx:tx+w]
-        if (cv2.absdiff(aligned, current).mean() / 255 <= .55 * change
-                and _similar_view(aligned, current, .85)):
+        source_overlap = np.s_[sy:sy+h, sx:sx+w]
+        target_overlap = np.s_[ty:ty+h, tx:tx+w]
+        aligned, current = before[source_overlap], after[target_overlap]
+        difference = cv2.absdiff(aligned, current)
+        if difference.mean() / 255 > .55 * change or not _similar_view(aligned, current, .85):
+            continue
+        # The grass can match even across a cut. Check differing features in
+        # either view so a shared field line cannot hide conflicting detail.
+        source_edges = cv2.morphologyEx(gray_before[source_overlap], cv2.MORPH_GRADIENT, None) >= 12
+        target_edges = cv2.morphologyEx(gray_after[target_overlap], cv2.MORPH_GRADIENT, None) >= 12
+        detail = source_edges | target_edges
+        mismatch = difference.mean(axis=2) > .10 * 255
+        one_sided = source_edges ^ target_edges
+        missing = np.count_nonzero(mismatch & one_sided)
+        # A long aligned boundary must not dilute disagreement at other edges.
+        if missing >= 12 and missing > .25 * np.count_nonzero(one_sided):
+            continue
+        if detail.any() and np.mean(mismatch[detail]) <= .15:
             return True
     return False
 

@@ -18,7 +18,7 @@ The ball starts at the highest-confidence candidate, then uses a constant-veloci
 
 ## Hard camera cuts
 
-The cut detector compares consecutive 160 × 90 color thumbnails. A substantial appearance change triggers a check for shared scene structure. It compares spatial luminance and chroma and looks for a pan or zoom supported by reversible optical-flow matches across the frame. An overlap-based translation check searches the center and edges in both directions when a sparse field view has too few corners for optical flow. Local graphic changes can leave the shot intact when most of the frame agrees and the unchanged areas contain structure in multiple quadrants. Alignment serves the cut decision. Track positions remain in image coordinates.
+The cut detector compares consecutive 160 × 90 color thumbnails. A substantial appearance change triggers a check for shared scene structure. It compares spatial luminance and chroma and looks for a pan or zoom supported by reversible optical-flow matches across the frame. An overlap-based translation check searches the center and edges in both directions when a sparse field view has too few corners for optical flow. The translated overlap must agree both across the image and at its visible edges. A compact graphic change can leave the shot intact when most of the frame agrees and the unchanged areas contain distinct two-dimensional features in multiple quadrants. Alignment serves the cut decision. Track positions remain in image coordinates.
 
 In the tracking configuration, `cut_appearance_threshold` defaults to 0.055 and controls the minimum normalized color change examined on textured frames. `cut_threshold` defaults to 0.32 for transitions between two low-detail frames. Keeping `cut_threshold` at 1.0 disables cut detection as before. Existing configuration files can omit the new field.
 
@@ -26,7 +26,7 @@ The first frame of a detected shot starts a fresh ByteTrack instance for each pe
 
 The Foundation audit replay covered eight existing review strips with 201 distinct frame boundaries. The updated tracker found EGYPT 925, MAN 806, and LIV 209 and 358 at the exact incoming frame. The archived tracker missed all four. The updated tracker also left all 197 reviewed non-cut boundaries unflagged, including continuous motion in FCB and the fast MAN close-up after 806. LIV frames 545–726 remained sealed. The review strips are development evidence from four clips and do not establish general cut detection accuracy.
 
-The full 928-frame EGYPT CUDA replay used the unchanged production detector and pitch checkpoint. It reproduced every archived JSONL record before frame 925. The new segment emitted neither a ball extrapolation nor pitch coordinates on frames 925–927. The verified `EGYPT-verified.mp4`, its JSONL and the artifact verification record are under `runs/camera-cut-v1`. The cut-only recheck after the final review fixes is recorded in `outputs/camera-cut-v1-post-review-verification.log`.
+The full 928-frame EGYPT CUDA replay used the unchanged production detector and pitch checkpoint. It reproduced every archived JSONL record before frame 925. The new segment emitted neither a ball extrapolation nor pitch coordinates on frames 925–927. The verified `EGYPT-verified.mp4`, its JSONL and the artifact verification record are under `runs/camera-cut-v1`. The cut-only recheck after the final review fixes is recorded in `outputs/camera-cut-v1-verified-audit.log`.
 
 ## Team classification (experimental)
 
