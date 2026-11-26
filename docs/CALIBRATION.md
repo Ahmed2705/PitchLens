@@ -28,7 +28,7 @@ For a landmark-only benchmark, use `scripts/benchmark_pitch_landmarks.py --input
 
 By default the field is 105 by 68 meters. Use `--pitch-config` with a JSON object such as `{"length_m": 110, "width_m": 70}` when actual dimensions are known. Standard box depths and widths, penalty spots and center-circle radius stay fixed as the field dimensions change. Coordinates originate at model corner 1, increase along the length toward corner 25 and across the width toward corner 6. The default dimensions are assumptions for the two supplied clips. The model's landmark orientation can be ambiguous on a symmetric pitch, especially across camera cuts. Coordinates do not establish a team's attacking direction.
 
-The estimator fits a pitch-to-image homography every frame with RANSAC and inverts it for mapping. It excludes low-confidence and image-edge landmarks, then checks inlier count, spatial support, whether the correspondences constrain a unique projective fit, pixel residual and local conditioning. When successive predictions agree, it blends their projected inlier landmarks and accepts the blend only if it still fits current evidence. Invalid frames clear the transform history. The [tracking cut signal](TRACKING.md#hard-camera-cuts) discards the previous transform before fitting the first frame of a new shot. With sufficient current landmarks that frame can emit a fresh, unsmoothed fit. Otherwise its coordinates are unavailable. A planar homography assumes a flat field and does not model lens distortion.
+The estimator fits a pitch-to-image homography every frame with RANSAC and inverts it for mapping. It excludes low-confidence and image-edge landmarks, then checks inlier count, spatial support, whether the correspondences constrain a unique projective fit, pixel residual and local conditioning. The video runner also requires dispersed support, stability under landmark removal and alignment with visible straight paint. When successive predictions agree, it blends their projected inlier landmarks and checks the blend against the current landmarks and paint. Invalid frames clear the transform history. The [tracking cut signal](TRACKING.md#hard-camera-cuts) discards the previous transform before fitting the first frame of a new shot. A frame with sufficient current evidence can emit a fresh, unsmoothed fit. Otherwise its coordinates are unavailable. A planar homography assumes a flat field and does not model lens distortion.
 
 The silent annotated MP4 includes a top-down pitch inset. Field players and goalkeepers are mapped using the bottom center of their boxes as an estimated ground contact. The mapper rejects boxes clipped at the sides or bottom. Filled markers fall within the current landmark support. Hollow markers use limited extrapolation. Coordinates outside the field or beyond the support margin are unavailable. Ball and referee tracks retain the existing output. Goalkeeper team remains unknown. Position by a goal may provide evidence for which end a goalkeeper defends, but linking that end to a team requires independent evidence. Nearby outfield players can be on either team, and the current team classifier does not establish team-to-end identity.
 
@@ -112,6 +112,43 @@ $weights = "$storage\models\football-pitch-detection-v9.pt"
 ```
 
 The measured summaries are in `outputs/calibration-reliability-v1-roboflow-canonical`, `outputs/calibration-reliability-v1-desktop-verified`, and `outputs/calibration-reliability-v1-u19`. The Roboflow inspection overlays are in `outputs/calibration-reliability-v1-roboflow` and the desktop smoothing replay is in `outputs/calibration-reliability-v1-desktop/static-checks.jpg`.
+
+## Landmark support and paint validation
+
+This development comparison keeps the corrected penalty-arc coordinates, v9 pose checkpoint and RANSAC settings from commit `4710164`. It adds two conservative acceptance checks.
+
+- Require the inlier hull to cover at least 3% of both the image area and modeled pitch area. Refit once per image-hull vertex, withholding that vertex. Reject if its projection is more than three times the RANSAC pixel tolerance from the observation, or if the refit cannot predict the vertex. A few observations can otherwise determine the shape of the whole projection despite a low inlier residual.
+- Sample perpendicular to the projected straight markings at 48 interior locations per marking. Look for a locally brighter stripe with green shoulders. Distances scale with image diagonal. Require support from at least two markings, each with at least four aligned samples covering at least 25% of its grass-supported samples and spanning at least 24 px at a 960 px image diagonal. A coherent displaced ridge spanning the same distance can veto a fit. A neighboring projected marking can explain the ridge when it has aligned paint that continues beyond the shared part by the same minimum span. Missed samples break that continuation when the gap between aligned samples exceeds 8 px at that image scale. The check uses the original video pixels and also checks any candidate smoothed fit. If current evidence fails, the runner returns unavailable coordinates and discards calibration history.
+
+The comparison replayed stored v9 predictions from the corrected-template study at their native float32 precision, with identical pixels and cut flags for both variants. The baseline acceptance and accepted matrices reproduced the retained reports. Roboflow images and visible annotations were checked against retained hashes. Errors are pooled native pixels at p50 and p90, using the same physical template for both variants.
+
+| Measurement | Corrected baseline | With validation |
+| --- | ---: | ---: |
+| Roboflow v18 accepted | 175 / 317 (55.2%) | 43 / 317 (13.6%) |
+| Desktop accepted | 829 / 928 (89.3%) | 143 / 928 (15.4%) |
+| Inter–Ajax U19 accepted | 162 / 390 (41.5%) | 47 / 390 (12.1%) |
+| Roboflow visible landmark error on each variant's accepted images (px) | 55.99 / 166.33 | 48.06 / 123.91 |
+| Roboflow visible landmark error for IDs absent from the candidate input (px) | 141.95 / 278.56 | 111.87 / 203.98 |
+| Roboflow missing-candidate median error above 50 px, among accepted eligible images | 108 / 118 | 26 / 27 |
+| Roboflow failures above 50 px or rejected fits, among all eligible images | 230 / 240 | 239 / 240 |
+
+The 43 common accepted Roboflow fits have identical projections. The aggregate error improvement comes from rejecting fits. Eligibility requires at least three visible labels whose IDs were absent from the candidate input. The new gates rejected 82 of the 108 eligible baseline fits above the descriptive 50 px threshold and 9 of the 10 at or below it. Large-error fits made up 96.3% of eligible accepted fits compared with 91.5% for the baseline. Baseline fits subsequently dropped had missing-candidate errors of 152.31 / 287.73 px across 544 labels. The threshold is used for reporting only.
+
+| Documented failure case | Baseline inlier RMSE | Outcome with validation |
+| --- | ---: | --- |
+| Desktop 505, halfway line drift | 4.16 px | Rejected for unstable support |
+| Desktop 540, displaced halfway line and circle | 3.76 px | Rejected for unstable support |
+| Desktop 623, displaced penalty box | 4.09 px | Rejected for concentrated support |
+| v18 `42ba34_2_10`, near touchline projects into the stands | 1.74 px | Rejected for insufficient paint |
+| v18 `121364_4_3`, displaced box predictions | 1.86 px | Still accepted |
+
+Paint rejected 482 desktop fits after the geometry checks, including frames 0, 144 and 421 where selected lines visibly diverge despite close fits to the landmarks. Some plausible fits can also be rejected when paint is shadowed, clipped, occluded or weak. The check can miss isolated or severely displaced lines when other markings provide enough nearby evidence. It samples straight lines and cannot resolve landmark identity, lens distortion or orientation ambiguity. The footage has no independent landmark annotations, so its acceptance and visual checks leave position accuracy unmeasured. The retained v18 errors and reduced coverage keep this an opt-in local evaluation.
+
+Use the development commands above with `--reliability` and fresh output directories to reproduce the comparison with new inference. To render the target desktop examples add `--overlay-frame 505 --overlay-frame 540 --overlay-frame 623`. The replay summaries, per-image and per-frame records, and desktop and U19 overlays are under `outputs/calibration-validation-milestone-*`. The desktop reset remains at frame 925, with too few landmarks for a fresh fit. U19 has the same six resets and the same 390 decoded frames of 391 reported.
+
+The CUDA desktop runner output decoded to 928 frames and matched the final replay's fit validity, rejection reasons, smoothing and cut flags throughout. The review fixes produced identical desktop replay matrices. The runner emitted 404 valid, 405 estimated and 12,771 unavailable player or goalkeeper observations. Every rejected frame returned null pitch coordinates and every emitted position was within the modeled field. The runner artifacts use the stem `outputs/calibration-validation-reviewed-runner-desktop`. The full local suite passed 127 tests.
+
+Independent GPT-6.2 Sol review of `e8cca69` identified the need for a shared error denominator, explicit handling of undecoded requested overlays, and protection against confusing neighboring markings. Follow-up reviews verified the fixes and exercised shifted, faint, detached and sparsely sampled paint. The final review of `9df7ad2` passed 19 targeted tests (session `01a21960-8919-7f00-87ef-5ee6a144cdf8`). SoccerNet remained sealed throughout this cycle.
 
 ## Reserved SoccerNet evaluation
 
