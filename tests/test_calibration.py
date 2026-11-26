@@ -79,6 +79,15 @@ class PitchCalibrationTests(unittest.TestCase):
         result = self.calibrator.update(self.observe(camera), frame.shape, frame=frame)
         self.assertTrue(result.metadata()['valid'], result.reason)
 
+    def test_visible_continuation_explains_neighbor_even_when_its_paint_is_partial(self):
+        camera = np.array([[10.5, 0., 100], [0., 0.75, 220], [0., 0., 1.]])
+        frame = self.painted_frame(camera, (540, 960, 3), 'Small rect. left top')
+        # Leave only the 74 px visible stretch of the neighboring penalty-box edge.
+        frame[230, 101:273] = (45, 110, 55)
+        cv2.line(frame, (118, 230), (192, 230), (220, 225, 220), 1)
+        result = self.calibrator.update(self.observe(camera), frame.shape, frame=frame)
+        self.assertTrue(result.metadata()['valid'], result.reason)
+
     def test_weak_neighbor_cannot_explain_coherently_shifted_paint(self):
         camera = np.array([[7.5, 0., 100], [0., 1., 220], [0., 0., 1.]])
         frame = np.full((540, 960, 3), (45, 110, 55), dtype=np.uint8)

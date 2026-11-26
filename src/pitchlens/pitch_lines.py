@@ -107,7 +107,7 @@ class PitchLineCheck:
         # An isolated player or logo can create a bright peak. A parallel offset
         # repeated along a line is evidence against the projected position.
         visible_segments = None
-        corroborated = np.flatnonzero((matches >= 4) & (matches >= 0.5 * samples_on_grass))
+        corroborated = np.flatnonzero((matches >= 4) & (matches >= 0.25 * samples_on_grass))
         for line in np.flatnonzero(samples_on_grass >= 12):
             if matches[line] >= 0.25 * samples_on_grass[line]:
                 continue
@@ -129,6 +129,7 @@ class PitchLineCheck:
                 tangent /= np.linalg.norm(tangent)
                 extent = locations @ tangent
                 margin = 2.5 * scale
+                lower, upper = extent.min() - margin, extent.max() + margin
                 aliases = np.zeros(len(hits), dtype=bool)
                 for neighbor in corroborated[corroborated != line]:
                     segment = visible_segments[visible_ids == neighbor]
@@ -137,14 +138,13 @@ class PitchLineCheck:
                         continue
                     other = points[(ids == neighbor) & aligned]
                     along = other @ tangent
-                    before = other[along < extent.min() - margin]
-                    after = other[along > extent.max() + margin]
+                    before = other[along < lower]
+                    after = other[along > upper]
                     if any(len(part) >= 4 and spans_marking(part) for part in (before, after)):
                         aliases |= near
                 unexplained = hits[~aliases]
                 if len(unexplained) >= minimum and spans_marking(points[unexplained]):
                     return 'contradictory_paint'
-        supported = np.flatnonzero((matches >= 4) & (matches >= 0.25 * samples_on_grass))
-        if sum(spans_marking(points[(ids == line) & aligned]) for line in supported) < 2:
+        if sum(spans_marking(points[(ids == line) & aligned]) for line in corroborated) < 2:
             return 'insufficient_paint'
         return None
