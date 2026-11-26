@@ -12,7 +12,7 @@ PitchLens has an accepted object detection baseline and a tracking implementatio
 
 - The project owner authorized autonomous execution of the complete detection feature, including compatible free dependencies, dataset preparation, local training, testing, documentation, and verified milestone commits and pushes.
 - Work stays within the approved scope, $0 budget and 1 GB total dataset download limit. External data paths remain configurable; raw datasets, model weights and generated experiments remain outside Git.
-- The detection baseline is implemented and evaluated on frames, with material accuracy and dataset limitations documented below. Tracking was subsequently authorized; stop before team classification.
+- The detection baseline is implemented and evaluated on frames, with material accuracy and dataset limitations documented below. Tracking and team classification were subsequently authorized; Feature #04 camera calibration and 2D pitch mapping is now authorized.
 
 ## Completed setup
 
@@ -125,7 +125,7 @@ Optional features require completion, integration, and testing of the core scope
 
 ## Feature #03: experimental team classification baseline
 
-- Added experimental LAB torso classification, configurable clustering and JSONL/video integration without training. Referees are excluded; goalkeeper affiliation is deferred until Feature #04 and remains unknown.
+- Added experimental LAB torso classification, configurable clustering and JSONL/video integration without training. Referees are excluded; goalkeeper affiliation remains unknown; it was deferred until Feature #04, which is now authorized.
 - Synthetic tests cover separation, reset, exclusions, grass, missing pixels, invalid configuration, and a correction when a second team enters after an early split. Two unlabelled videos were processed and representative frames inspected; no accuracy is measured. The focused revision passed 33 tests. U19 coverage was 0/3,362 player observations; desktop coverage was 11,986/13,175 with 2 label changes in 11,706 consecutive assigned same-ID pairs. Coverage is not accuracy. U19 remains unusable; this feature is not verified.
 
 ## Preliminary hybrid initialization exploration
