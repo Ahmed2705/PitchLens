@@ -11,11 +11,11 @@ import cv2
 import numpy as np
 import torch
 import yaml
-from ultralytics.utils import YAML
 
 from pitchlens.detection_manifest import label_for, sha256
 from pitchlens.detector import CLASS_NAMES, Detection
 from scripts.evaluate_detection import confusion_at_default_threshold, evaluate, fixed_threshold_scores, targets_for
+from ultralytics.utils import YAML
 
 
 class FakeDetector:
