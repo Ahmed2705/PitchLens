@@ -6,17 +6,22 @@ import argparse
 from collections import Counter
 import hashlib
 from itertools import combinations
+import json
 from pathlib import Path
 
 from audit_foundation_datasets import digest, image_features
-from prepare_detection_candidate import NEAR_DISTANCE, read_json, write_json
+from prepare_detection_candidate import NEAR_DISTANCE, write_json
 from review_candidate_annotations import (
     CLASSES, EXPORT_COMPLETE, MANIFEST_SHA256, Review, parse_yolo,
 )
 
 PROVENANCE_SHA256 = "af549ebcf90416d28f0f094a5aa35e3b7e6439f7bd4245b5c88323f2dd3190f5"
+EXPORT_MANIFEST_SHA256 = "89ed7ee1a6aeaf90e06bc4f52d1328025b6caa2a6334466b00ee591a339a9fba"
+CANDIDATE_MANIFEST_SHA256 = "eda48473212a3f4911b56ae9a061e1f938d8ccccc4961345c42bf62f6f666d1e"
 EXPECTED_SPLITS = {"train": 371, "val": 57}
 EXPECTED_REVIEW = {"train": 113, "val": 20}
+EXPECTED_BOXES = {"train": dict(zip(CLASSES, (6651, 229, 722, 341))),
+                  "val": dict(zip(CLASSES, (977, 37, 120, 54)))}
 DATA_YAML = "train: train/images\nval: val/images\nnames: [player, goalkeeper, referee, ball]\n"
 
 
@@ -37,11 +42,26 @@ def verified_boxes(data: bytes) -> list[list]:
     return boxes
 
 
+def verified_json(path: Path, expected: str):
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != expected:
+        raise ValueError(f"Approved manifest hash mismatch: {path}")
+    return json.loads(data)
+
+
+def approved_candidate_manifest(rows: list[dict]) -> bytes:
+    """Bind the full corrected label payload to the historical Candidate v2 manifest."""
+    data = (json.dumps(rows, indent=2) + "\n").encode("utf-8")
+    if hashlib.sha256(data).hexdigest() != CANDIDATE_MANIFEST_SHA256:
+        raise ValueError("Candidate v2 manifest differs from the approved image and label hashes")
+    return data
+
+
 def verify_export(review: Review, export: Path) -> tuple[dict, dict[str, bytes]]:
     marker = export / EXPORT_COMPLETE
     if not marker.is_file() or marker.read_bytes():
         raise ValueError("Missing or invalid export completion marker")
-    manifest = read_json(export / "review.json")
+    manifest = verified_json(export / "review.json", EXPORT_MANIFEST_SHA256)
     if (manifest["manifest_sha256"] != MANIFEST_SHA256
             or manifest["classes"] != list(CLASSES)
             or manifest["progress_revision"] != 423):
@@ -107,17 +127,15 @@ def build(source: Path, export: Path, output: Path) -> dict:
         raise ValueError("Use a separate destination for the new dataset")
     if output.exists():
         raise FileExistsError(output)
-    provenance_path = source / "provenance.json"
-    if digest(provenance_path) != PROVENANCE_SHA256:
-        raise ValueError("Candidate v1 provenance hash mismatch")
+    provenance = verified_json(source / "provenance.json", PROVENANCE_SHA256)
     # The review loader reuses the editor's original frame selection and image
     # identities. Point it at the export so it does not load or modify the draft.
     review = Review(source, export)
     export_manifest, corrections = verify_export(review, export)
-    rows = read_json(source / "manifest.json")
+    rows = verified_json(source / "manifest.json", MANIFEST_SHA256)
     if Counter(row["split"] for row in rows) != EXPECTED_SPLITS:
         raise ValueError("Unexpected Candidate v1 development split")
-    verify_boundaries(rows, read_json(provenance_path))
+    verify_boundaries(rows, provenance)
     payload = {}
     reviewed = []
     stats = {split: Counter() for split in EXPECTED_SPLITS}
@@ -151,6 +169,9 @@ def build(source: Path, export: Path, output: Path) -> dict:
         row["label_sha256"] = hashlib.sha256(label).hexdigest()
     if len(reviewed) != len(corrections):
         raise ValueError("Reviewed frames must each map to exactly one development entry")
+    if stats != EXPECTED_BOXES:
+        raise ValueError(f"Unexpected Candidate v2 class totals: {stats}")
+    manifest_bytes = approved_candidate_manifest(rows)
 
     output.mkdir(parents=True, exist_ok=False)
     for name, data in payload.items():
@@ -159,7 +180,7 @@ def build(source: Path, export: Path, output: Path) -> dict:
         destination.write_bytes(data)
         if destination.read_bytes() != data:
             raise OSError(f"Dataset write verification failed: {name}")
-    write_json(output / "manifest.json", rows)
+    (output / "manifest.json").write_bytes(manifest_bytes)
     write_json(output / "corrections.json", reviewed)
     (output / "data.yaml").write_text(DATA_YAML, encoding="utf-8")
     report = {
@@ -167,7 +188,7 @@ def build(source: Path, export: Path, output: Path) -> dict:
         "parent_manifest_sha256": MANIFEST_SHA256,
         "parent_provenance_sha256": PROVENANCE_SHA256,
         "export": export.name,
-        "export_manifest_sha256": digest(export / "review.json"),
+        "export_manifest_sha256": EXPORT_MANIFEST_SHA256,
         "export_revision": export_manifest["progress_revision"],
         "manifest_sha256": digest(output / "manifest.json"),
         "corrections_manifest_sha256": digest(output / "corrections.json"),

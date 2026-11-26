@@ -48,18 +48,20 @@ The output contains YOLO image and label folders, `data.yaml`, a per-image `mani
 
 The approved baseline uses the official pretrained `yolo26s.pt`, 640-pixel input, CUDA, AMP, automatic batch size and optimizer, seed 42, a 100-epoch maximum and early stopping after 20 unimproved epochs. [The configuration](../configs/detection_train.json) uses modest color, translation, scale, horizontal-flip and mosaic augmentations. Vertical flips, rotation, mixup and perspective changes are disabled. A smoke run uses 5% of training images for one epoch and never uses the test split.
 
-Download the official weights separately to an ignored local location and supply the paths explicitly. Runs must use a new directory; existing experiments are never overwritten.
+Supply the local official weights, a fresh run directory and the independently recorded digest of the approved training manifest. Set `$approvedManifestSha256` to that digest before running either command.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\train_detection.py `
   --data data\processed\detection-v4\data.yaml `
+  --manifest-sha256 $approvedManifestSha256 `
   --weights models\yolo26s.pt --run runs\detection-smoke --smoke
 .\.venv\Scripts\python.exe scripts\train_detection.py `
   --data data\processed\detection-v4\data.yaml `
+  --manifest-sha256 $approvedManifestSha256 `
   --weights models\yolo26s.pt --run runs\detection-baseline-640
 ```
 
-Each run records input and manifest hashes, requested settings, GPU details, losses and validation metrics, per-epoch peak PyTorch GPU memory, and checkpoints. The selected batch and optimizer are stored in checkpoints; periodic training checkpoints retain optimizer state, while Ultralytics strips it from finalized `best.pt` and `last.pt`. `best.pt` is selected on validation, never on test data. The figures depend on hardware and library versions; deterministic settings do not guarantee bit-for-bit equivalence across platforms.
+Each run records input and manifest hashes, requested settings, GPU details, losses and validation metrics, per-epoch peak PyTorch GPU memory, and checkpoints. The selected batch and optimizer are stored in checkpoints. Periodic checkpoints and `best.pt` retain that state, and `--save-resumable` preserves the latest state before Ultralytics strips the finalized `last.pt`. Validation fitness selects `best.pt`. The figures depend on hardware and library versions, and deterministic settings do not guarantee bit-for-bit equivalence across platforms.
 
 Ultralytics identifies its installed package license as AGPL-3.0. The PitchLens project license remains an open decision.
 
@@ -77,13 +79,14 @@ for detection in detector.detect(frame):
     print(detection.class_id, detection.confidence, detection.xyxy)
 ```
 
-Select the checkpoint, input resolution and operating threshold using validation only. The following evaluates a frozen checkpoint with the preselected 960-pixel resolution and 0.25 threshold; use a new output directory for each run. Only use `--split test` after model selection is final, and do not use test results to tune the model or threshold.
+Select the checkpoint, input resolution and operating threshold using validation only. Pass the independently recorded SHA-256 of the frozen manifest and use a fresh output directory outside the dataset. Scoring checks every selected image and label against the manifest and uses verified copies for AP and fixed-threshold metrics. The reserved test split requires separate approval after model selection.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\evaluate_detection.py `
   --data data\processed\detection-v4\data.yaml `
+  --manifest-sha256 $approvedManifestSha256 `
   --weights runs\detection-baseline-640\weights\best.pt `
-  --run runs\detection-final-test --split test --image-size 960 --confidence 0.25
+  --run runs\detection-development-check --split val --image-size 960 --confidence 0.25
 ```
 
 `evaluation.json` records mAP50 and mAP50–95, per-class AP, and precision, recall and confusion counts at the fixed threshold and IoU 0.5. Overall precision and recall are macro averages over classes. Ultralytics' own console output may show precision and recall at its F1-selected confidence; use the fixed-threshold values in `evaluation.json` for the untouched test report. The utility also benchmarks the frame API on a validation frame without file I/O or drawing, records PyTorch peak GPU memory, and saves annotated validation samples. The benchmark excludes video decoding and encoding and is not an end-to-end video throughput claim.

@@ -1,6 +1,6 @@
 # Detection final evaluation v1
 
-**Stopped at the independent review gate. Keep the current production checkpoint and retain Candidate v2 for architectural review.** The 109-image Crystal Palace–Arsenal holdout, the 462-image IFAP domain set, and the original 25-frame frozen test stayed sealed. Evaluation input freezing and reserved scoring did not start.
+**The reserved evaluation gate remains closed.** Keep the current production checkpoint and retain Candidate v2 for architectural review. The 109-image Crystal Palace–Arsenal holdout, the 462-image IFAP domain set, and the original 25-frame frozen test stayed sealed.
 
 ## Independent review
 
@@ -40,6 +40,50 @@ The SHA-256 values below come from the prior development report. They were used 
 
 ## Architectural recommendation
 
-Keep production in place. Address the annotation and evaluation input verification findings and approve an isolated evaluation path before opening either held-out set. The implementation, datasets, settings, and checkpoints remain as they were at the start of this review. No new model metrics or confusion matrices were generated.
+Keep production in place. Opening any reserved partition requires separate approval after infrastructure verification. The development scores above are historical.
 
 The machine-readable gate decision and findings are in `E:\PitchLensStorage\outputs\detection-final-evaluation-v1\review-gate.json`. The raw local Codex review log is `outputs/detection-final-evaluation-v1-independent-review.log`.
+
+## Infrastructure remediation
+
+| Finding | Change and verification |
+| --- | --- |
+| Dataset builder integrity | The builder pins the original review manifest and the previously recorded byte-for-byte final Candidate v2 manifest. The final manifest binds every image and label SHA-256 to its source and frame. Identity, split, provenance and box-count checks run before publication. A fresh development rebuild matched all four existing metadata files and reproduced 371 training and 57 validation pairs. A regression test checks a coordinate edit that preserves the class and box count. |
+| Evaluation input integrity | The evaluator requires the previously recorded manifest SHA-256. It rejects missing, changed, extra or linked files in the selected trees and copies verified bytes into the new run. Hash checks cover both image and annotation files. |
+| Metric population | The aggregate AP loader receives a list of explicit files. Its accepted annotations and consumed frame identities are checked against that list. Source-group AP and fixed-threshold counts use exactly the manifest-derived subsets. Synthetic runs check aggregate and group coverage, including a skipped-frame failure. |
+| Checkpoint continuation | The launcher reserves a fresh output directory and overrides the historical destination before Ultralytics can write artifacts. The setup-only CUDA smoke used a disposable copy of the epoch-40 checkpoint and verified model weights from EMA, EMA updates, 366 optimizer state entries, AMP scaler and early-stopping state. Ultralytics reconstructs the scheduler from the saved epoch and schedule settings. The next epoch was 41, with a verified learning rate of `0.000755` in each of the three parameter groups. The smoke ran zero training epochs. Before-and-after SHA-256 checks matched all 35 existing files in the Candidate v2 training and two development evaluation directories. |
+| Cache isolation | The aggregate pass and each source group use independent temporary copies under the run directory. Two synthetic evaluations exercised the real Ultralytics dataset loader and checked matching populations and metric results, distinct caches, and preservation of a pre-existing dataset cache. |
+
+The setup-only result is in `runs/detection-resume-smoke-repair-v1-verified/resume_state.json`. No YOLO26s performance metrics were generated during remediation. Repeated scoring was verified on synthetic fixtures.
+
+All 88 tests passed with `python -m unittest discover -s tests` in the project environment.
+
+### Independent remediation review
+
+**Blocking. Stop before using native continuation.** The read-only Codex CLI review used `gpt-6.2-sol` in session `01a21847-12d7-78b3-a0fc-3c0cc70e2557`. The reviewer cleared the builder pin, evaluation input verification, metric population consistency and cache isolation. The setup-only smoke established state restoration for the specific Candidate v2 checkpoint and development manifest used in that run. The reviewer identified the following gaps in native continuation.
+
+| Severity | Finding |
+| --- | --- |
+| P2 | The launcher verifies the supplied manifest but does not compare its hash with the original checkpoint run’s recorded dataset hash. A different valid manifest can be paired with the saved optimizer and best fitness. [Resume input verification](../scripts/train_detection.py#L123) |
+| P2 | The launcher accepts a checkpoint without saved early-stopping fields. Ultralytics initializes a new stopper in that case, resetting patience while the verification reports success. [Resume state verification](../scripts/train_detection.py#L82) |
+| P3 | Ultralytics may designate a resumed checkpoint as the new run’s best on a tie with the historical best. That behavior conflicts with the documented strict-improvement rule. [Native continuation](../scripts/train_detection.py#L150) |
+
+The first remediation stopped before commit or push. The local review log is `outputs/detection-repair-v1-independent-sol-review.log`.
+
+## Final continuation remediation
+
+| Finding | Repair |
+| --- | --- |
+| Checkpoint dataset binding | The training launcher requires an approved manifest SHA-256 and uses a verified temporary copy of the training and validation partitions. It embeds the manifest hash in each checkpoint. Continuation compares the supplied hash with the embedded value, checks the manifest bytes and verifies the staged image and label payload. A valid manifest from another dataset and a modified manifest are both rejected. |
+| Complete early-stopping state | Checkpoints retain the best fitness and epoch, patience, epochs without improvement, and the imminent-stop flag. Continuation requires a complete, consistent record and rejects checkpoints whose patience or epoch budget is exhausted. |
+| Strict best checkpoint selection | Selection compares finite fitness scores with a strict greater-than comparison. A continuation inherits the exact selected checkpoint, identified by the saved SHA-256 when it came from an earlier epoch. Equal or lower scores preserve the saved best fitness, epoch and bytes. Ultralytics final validation operates on a temporary copy of the selected checkpoint. |
+
+The first review of this continuation repair cleared dataset binding and stopping-state restoration and found that a continuation needed to carry forward the historical best checkpoint. It also identified the pre-validation save path and the baseline command examples. The follow-up found that normal best-checkpoint replacement could remove the only copy needed by an earlier periodic checkpoint. The launcher now archives superseded best checkpoints by SHA-256, verifies and carries forward the required file, supports complete pre-validation state, and requires checkpoint saving. The loader checks accepted annotation rows against the manifest-verified labels, and both training examples document the required manifest argument.
+
+The archived Candidate v2 snapshot was confirmed to fail the provenance check. Historical run metadata was preserved, and no checkpoint provenance was added retroactively. The positive CUDA smoke instead used a disposable checkpoint built from an untrained YOLO26s architecture and synthetic images, labels, and checkpoint state. It performed zero training epochs or performance evaluation. The reserved evaluation gate requires separate approval.
+
+### Final verification and independent review
+
+- All 37 detection tests and all 95 project tests passed with `unittest discover`. The before-and-after inventory matched the SHA-256 of all 148 protected existing artifacts.
+- The CUDA smoke resumed a synthetic periodic checkpoint after a later score superseded its historical best. It rejected a different valid dataset manifest and an incorrect sibling checkpoint, then restored the exact historical best from the archive. It verified the model from EMA, optimizer, scheduler, AMP scaler and early-stopping state. The next epoch was 4 and one epoch of patience remained. All checkpoint and score values in this smoke came from the fixture.
+- The final read-only independent review was nonblocking. The Codex CLI identified the model as `gpt-6.2-sol` for session `01a2185d-0b04-7092-b484-159c3e592993`. It confirmed that the effective configuration guard rejects disabled checkpoint saving before the native trainer writes artifacts. It cleared all three continuation findings and confirmed the four earlier safeguards. The local review log is `outputs/detection-final-repair-gate-sol-review.log`.

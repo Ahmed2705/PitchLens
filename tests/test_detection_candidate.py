@@ -1,17 +1,19 @@
 """Regression checks for detection candidate integrity and crop labels."""
 
 import json
+from hashlib import sha256
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from prepare_detection_candidate import Image, exact_conflicts, verify_group_boundaries
-from prepare_detection_candidate_v2 import verified_boxes, verify_boundaries, verify_export
+from prepare_detection_candidate_v2 import approved_candidate_manifest, verified_boxes, verify_boundaries, verify_export
 from review_candidate_annotations import CLASSES, MANIFEST_SHA256
 from verify_detection_crop import boxes_agree
 
@@ -65,9 +67,25 @@ class CorrectedCandidateTests(unittest.TestCase):
             (root / "_COMPLETE").touch()
             manifest = {"manifest_sha256": MANIFEST_SHA256, "classes": CLASSES, "progress_revision": 423,
                         "frames": [{"frame_id": "frame", "status": "reviewed", "label_path": "val/labels/frame.txt"}]}
-            (root / "review.json").write_text(json.dumps(manifest), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "Wrong label path"):
+            raw = json.dumps(manifest).encode()
+            (root / "review.json").write_bytes(raw)
+            with self.assertRaisesRegex(ValueError, "Approved manifest hash"):
                 verify_export(review, root)
+            with patch("prepare_detection_candidate_v2.EXPORT_MANIFEST_SHA256", sha256(raw).hexdigest()):
+                with self.assertRaisesRegex(ValueError, "Wrong label path"):
+                    verify_export(review, root)
+
+    def test_coordinate_edit_with_unchanged_box_count_breaks_candidate_pin(self):
+        original = b"3 0.5 0.5 0.2 0.2\n"
+        edited = b"3 0.6 0.5 0.2 0.2\n"
+        self.assertEqual(len(verified_boxes(original)), len(verified_boxes(edited)))
+        rows = [{"frame_id": "reviewed-frame", "label_sha256": sha256(original).hexdigest()}]
+        canonical = (json.dumps(rows, indent=2) + "\n").encode()
+        with patch("prepare_detection_candidate_v2.CANDIDATE_MANIFEST_SHA256", sha256(canonical).hexdigest()):
+            self.assertEqual(approved_candidate_manifest(rows), canonical)
+            rows[0]["label_sha256"] = sha256(edited).hexdigest()
+            with self.assertRaisesRegex(ValueError, "differs from the approved"):
+                approved_candidate_manifest(rows)
 
     def test_normalized_boxes_allow_edge_roundoff_but_reject_invalid_labels(self):
         self.assertEqual(len(verified_boxes(b"3 0.95 0.5 0.10000001 0.1\n")), 1)

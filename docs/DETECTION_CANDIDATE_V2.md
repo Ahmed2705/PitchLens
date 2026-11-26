@@ -22,7 +22,7 @@ The RTX 2060 SUPER passed the one-epoch CUDA and AMP smoke test with 19 training
 The run completed 40 epochs in about 8 minutes 34 seconds. Early stopping triggered after 20 epochs without improved validation mAP50–95. The selected epoch was 20 with **78.71% mAP50** and **46.05% mAP50–95** at 640 pixels. The training curves are in `runs/detection-candidate-v2-640/results.png` and the epoch data are in `results.csv` in the same directory.
 
 - `weights/best.pt` is the evaluated Candidate v2 checkpoint. SHA-256 `cd05e022e02e5d4f6f6192fea438e8ebf5644a0e8fa575295366af9dc1e658eb`.
-- `weights/last-resumable.pt` retains optimizer, AMP scaler, EMA and early-stopping state through epoch 40. SHA-256 `8c6c5101cea85607584e2f28ef31108a64b7daf489d57837677510c935ad55a4`. The checkpoint was loaded to verify its state.
+- `weights/last-resumable.pt` retains optimizer, AMP scaler, EMA and early-stopping state through epoch 40. SHA-256 `8c6c5101cea85607584e2f28ef31108a64b7daf489d57837677510c935ad55a4`. The isolated restore check and its results are recorded in the [final evaluation gate report](DETECTION_FINAL_EVALUATION_V1.md#infrastructure-remediation).
 - The automatically exported `weights/last.pt`, periodic epoch checkpoints, training logs, effective arguments and GPU memory history are preserved.
 
 ## Development evaluation
@@ -67,15 +67,29 @@ $python = '.\.venv\Scripts\python.exe'
   --output data/processed/detection-candidate-v2
 
 $data = 'data/processed/detection-candidate-v2/data.yaml'
-& $python scripts/train_detection.py --data $data --weights models/yolo26s.pt `
+$manifest = 'eda48473212a3f4911b56ae9a061e1f938d8ccccc4961345c42bf62f6f666d1e'
+& $python scripts/train_detection.py --data $data --manifest-sha256 $manifest --weights models/yolo26s.pt `
   --run runs/detection-candidate-v2-smoke --smoke
-& $python scripts/train_detection.py --data $data --weights models/yolo26s.pt `
+& $python scripts/train_detection.py --data $data --manifest-sha256 $manifest --weights models/yolo26s.pt `
   --run runs/detection-candidate-v2-640 --save-resumable
 
-& $python scripts/evaluate_detection.py --data $data --split val --image-size 960 `
+& $python scripts/evaluate_detection.py --data $data --manifest-sha256 $manifest --split val --image-size 960 `
   --confidence 0.25 --by-source-group --weights runs/detection-baseline-640-v2/weights/best.pt `
   --run runs/detection-candidate-v2-production-eval
-& $python scripts/evaluate_detection.py --data $data --split val --image-size 960 `
+& $python scripts/evaluate_detection.py --data $data --manifest-sha256 $manifest --split val --image-size 960 `
   --confidence 0.25 --by-source-group --weights runs/detection-candidate-v2-640/weights/best.pt `
   --run runs/detection-candidate-v2-eval
 ```
+
+### Isolated continuation
+
+The archived Candidate v2 checkpoint predates the embedded training manifest hash and complete early-stopping record. The current launcher rejects that snapshot for continuation. The archived weights remain available for their existing uses.
+
+For a future authorized run, pass its independently recorded manifest hash when starting training. Checkpoints embed that hash and the complete early-stopping state. Use `--resume-smoke` with a checkpoint produced by this launcher to check restoration without running any training epochs. Set `$boundCheckpoint` to that checkpoint and choose a fresh sibling run directory.
+
+```powershell
+& $python scripts/train_detection.py --data $data --manifest-sha256 $manifest `
+  --weights $boundCheckpoint --run runs/detection-resume-check --resume-smoke
+```
+
+With separate training authorization, use `--resume` and another fresh run path to continue through the original epoch limit or remaining patience. The launcher uses a disposable checkpoint copy and a byte-verified copy of the original training and validation data. It restores model weights from the saved EMA and reconstructs the learning-rate scheduler position from the saved epoch and schedule settings. The saved optimizer, AMP scaler, EMA and early-stopping state are checked before the first resumed epoch. The new run inherits the verified best checkpoint and replaces it only when fitness strictly improves. Superseded best checkpoints are retained under hash-based filenames so earlier periodic checkpoints remain resumable. Use `--best-weights` when the exact historical file has been moved elsewhere.
