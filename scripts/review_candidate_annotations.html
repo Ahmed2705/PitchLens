@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PitchLens annotation correction</title>
+  <style>
+    * { box-sizing: border-box }
+    body { margin: 0; font: 15px system-ui, sans-serif; background: #eef2f4; color: #172630 }
+    header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 18px; background: #143b42; color: white }
+    h1 { margin: 0 auto 0 0; font-size: 19px }
+    h2 { margin: 12px 0 6px; font-size: 15px }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) 285px; gap: 12px; padding: 12px }
+    [hidden] { display: none !important }
+    section { min-width: 0 }
+    .panel { background: white; border: 1px solid #c7d2da; border-radius: 6px; padding: 10px }
+    .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px }
+    button, select { font: inherit; max-width: 100%; padding: 4px 7px; color: #172630 }
+    button { cursor: pointer }
+    button:disabled { cursor: default; opacity: .55 }
+    button[aria-pressed="true"] { background: #164d55; color: white }
+    #work { overflow: auto; height: min(76vh, 860px); min-height: 300px; background: #16252c; margin-top: 8px; border-radius: 6px }
+    canvas { display: block; margin-inline: auto; touch-action: none; cursor: crosshair }
+    .muted, small { color: #42545e }
+    #notice { margin: 8px 14px; color: #704512; overflow-wrap: anywhere }
+    #flags, #boxes { margin: 0; padding: 0; list-style: none }
+    #flags button, #boxes button { display: block; width: 100%; text-align: left; margin-bottom: 4px }
+    #flags button { background: #fff6d7; border: 1px solid #c2a564; border-radius: 4px }
+    #boxes { max-height: 214px; overflow: auto }
+    kbd { font-family: inherit; font-weight: 600 }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr } }
+  </style>
+  <script defer src="/review.js"></script>
+</head>
+<body>
+  <header>
+    <h1>PitchLens · Candidate v1 annotation correction</h1>
+    <span id="saved" role="status">Loading…</span>
+    <button id="retry" hidden>Retry save</button>
+    <button id="export" disabled>Export reviewed YOLO labels</button>
+  </header>
+  <p id="notice" role="status" hidden></p>
+  <main id="editor" hidden>
+    <section>
+      <div class="panel">
+        <div class="row">
+          <button id="prev">← Previous</button>
+          <select id="frame" aria-label="Review frame"></select>
+          <button id="next">Next →</button>
+          <button id="pending">Next pending</button>
+        </div>
+        <div class="row">
+          <button id="zoom-out" aria-label="Zoom out">−</button>
+          <button id="fit">Fit</button>
+          <button id="zoom-in" aria-label="Zoom in">+</button>
+          <output id="zoom-level">Fit</output>
+          <label><input id="show-boxes" type="checkbox" checked> Boxes</label>
+          <label><input id="show-flags" type="checkbox" checked> Markers</label>
+        </div>
+        <div id="counts" class="muted"></div>
+      </div>
+      <div id="work">
+        <canvas id="canvas" width="640" height="640" aria-label="Editable frame image"></canvas>
+      </div>
+    </section>
+    <aside class="panel">
+      <h2>Review status</h2>
+      <div class="row">
+        <button data-status="reviewed">Reviewed</button>
+        <button data-status="uncertain">Uncertain</button>
+        <button data-status="unreviewed">Pending</button>
+      </div>
+      <h2>Discrepancies</h2>
+      <ul id="flags"></ul>
+      <small id="no-flags">No prior flags for this frame.</small>
+      <h2>Bounding boxes</h2>
+      <div class="row">
+        <button id="select">Select</button>
+        <button id="add">Add</button>
+        <select id="role" aria-label="Bounding box class"></select>
+        <button id="remove">Delete</button>
+      </div>
+      <ol id="boxes"></ol>
+      <h2>Keyboard shortcuts</h2>
+      <small><kbd>←</kbd> / <kbd>→</kbd> frames · <kbd>A</kbd> add · <kbd>Esc</kbd> select ·
+        <kbd>1–4</kbd> class · <kbd>Delete</kbd> remove · <kbd>+</kbd> / <kbd>−</kbd> zoom ·
+        <kbd>0</kbd> fit · <kbd>R</kbd> reviewed · <kbd>U</kbd> uncertain</small>
+    </aside>
+  </main>
+</body>
+</html>

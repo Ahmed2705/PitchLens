@@ -80,6 +80,21 @@ The review files are local under `runs/detection-candidate-v1-annotation-review`
 
 The repository's full `unittest` suite passed all 67 tests.
 
+### Offline correction tool
+
+From the project root, run the launcher and open `http://127.0.0.1:8765/` in a local browser. Keep the terminal open during review. The tool uses the existing Foundation annotation toolkit's canvas approach and requires no downloads or external services.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\review_candidate_annotations.py
+```
+
+- The first 20 frames are Persija validation. Chelsea follows in chronological order within each half. Use the frame menu to jump to either Chelsea half and **Next pending** to find the next unreviewed frame, with Persija first.
+- Click a numbered discrepancy to zoom to the relevant area. Use **Add** and drag to create a box. In **Select** mode, drag a box to move it, drag a corner to resize it, choose a class to reclassify it, or click **Delete**. Use the box list to select a specific overlapping box. The tool preloads dataset labels and shows the prior review's locations as separate markers.
+- Use **Reviewed**, **Uncertain** or **Pending** to record the frame's status. Editing a reviewed frame returns it to pending. The sidebar lists keyboard shortcuts. Wait for **Progress saved** before closing the browser or stopping the terminal. Restarting the launcher restores the last frame and all saved drafts from `runs/detection-candidate-v1-corrections/progress.json`.
+- **Export reviewed YOLO labels** creates a new `export-*` directory under that same workspace. It contains reviewed labels under `val/labels` and `train/labels`, using the original image basenames. `review.json` records the status of all 133 frames. Pending and uncertain drafts remain in progress, so partial exports are suitable for incremental review. The source dataset is read-only to the tool. Retain each export separately for manual verification.
+
+Verification passed all 70 unit tests. A local Chrome check decoded all 133 review images and exercised the editor, autosave and reload, validation-first navigation, and reviewed-only export in an isolated workspace.
+
 ## Reproduce and verify
 
 Run from the project root with the pinned project environment and new output paths. The audit and raw exports remain in external storage.
