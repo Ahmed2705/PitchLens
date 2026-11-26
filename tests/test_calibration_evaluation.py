@@ -1,9 +1,10 @@
 import hashlib
 from io import BytesIO
 import json
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, mock_open, patch
 from zipfile import ZipFile
 
 import cv2
@@ -11,7 +12,7 @@ import numpy as np
 
 from pitchlens.calibration import PitchCalibrator, PitchConfig, project
 from scripts.evaluate_calibration import (
-    compare_calibrators, compare_frame, roboflow_labels, soccernet_rows, summarize, video_decode_status,
+    compare_calibrators, compare_frame, main, roboflow_labels, soccernet_rows, summarize, video_decode_status,
 )
 from scripts.score_planar_calibration import planar_markings, read_planar_labels, score_planar, visible_segments
 
@@ -144,3 +145,26 @@ class CalibrationEvaluationTests(unittest.TestCase):
         self.assertEqual(video_decode_status(928, 545, 545)['status'], 'frame_limit')
         self.assertEqual(video_decode_status(928, 540, 545)['status'], 'early_end')
         self.assertEqual(video_decode_status(0, 390, None)['status'], 'unreported_frame_count')
+
+    def test_cli_fails_when_video_ends_before_requested_frame_limit(self):
+        from pitchlens import tracking  # noqa: F401 - Load runtime dependencies before mocking file I/O.
+
+        argv = ['evaluate_calibration', 'video', '--input', 'fixture.mp4',
+                '--weights', 'fixture.pt', '--output', 'fixture', '--stop-before', '2']
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.get.side_effect = {cv2.CAP_PROP_FRAME_COUNT: 3, cv2.CAP_PROP_FPS: 24}.__getitem__
+        capture.read.side_effect = [(True, self.frame), (False, None)]
+        detector = Mock()
+        detector.return_value.detect.return_value = None
+        landmarks = SimpleNamespace(PitchLandmarkDetector=detector, CHECKPOINT_SHA256='fixture')
+        with (patch('sys.argv', argv),
+              patch('scripts.evaluate_calibration.cv2.VideoCapture', return_value=capture),
+              patch.dict('sys.modules', {'pitchlens.pitch_landmarks': landmarks}),
+              patch.object(Path, 'mkdir'), patch.object(Path, 'open', mock_open()),
+              patch('scripts.evaluate_calibration.video_overlays') as overlays):
+            with self.assertRaisesRegex(ValueError, 'Video ended before the requested frame limit'):
+                main()
+        detector.return_value.detect.assert_called_once()
+        capture.release.assert_called_once()
+        overlays.assert_not_called()

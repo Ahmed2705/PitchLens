@@ -350,6 +350,8 @@ def main():
     if not rows:
         raise ValueError('No input frames decoded')
     if args.mode == 'video':
+        if decoding['status'] == 'early_end':
+            raise ValueError(f'Video ended before the requested frame limit: {decoding}')
         if decoding['status'] not in ('complete', 'frame_limit'):
             warnings.warn(f'Video coverage is unverified: {decoding}', stacklevel=1)
         video_overlays(args.input, args.output, rows, markings)
