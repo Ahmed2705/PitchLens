@@ -89,9 +89,23 @@ class CameraCutTests(unittest.TestCase):
         before = np.full((90, 160, 3), (35, 145, 35), np.uint8)
         for x in range(0, 160, 16):
             before[:, x:x+8] = (38, 163, 38)
-        after = before.copy()
-        before[:27, :64] = 220
-        after[63:, 96:] = 220
+        textured = before.copy()
+        for y in range(13, 90, 18):
+            for x in range(8, 160, 16):
+                cv2.circle(textured, (x, y), 2, (35, 180, 35), -1)
+        for image in (before, textured):
+            first, second = image.copy(), image.copy()
+            first[:27, :64] = 220
+            second[63:, 96:] = 220
+            for a, b in ((first, second), (second, first)):
+                self.assertTrue(is_hard_cut(a, b, **CUT_THRESHOLDS))
+
+    def test_refinement_keeps_conflicting_features_at_integer_overlap_boundary(self):
+        before = np.full((90, 160, 3), (35, 145, 35), np.uint8)
+        before[:55] = 235
+        after = cv2.warpAffine(before, np.array([[1., 0., 0.], [0., 1., 9.]]),
+                               (160, 90), borderMode=cv2.BORDER_REPLICATE)
+        after[9, 20:140] = 0
         for a, b in ((before, after), (after, before)):
             self.assertTrue(is_hard_cut(a, b, **CUT_THRESHOLDS))
 

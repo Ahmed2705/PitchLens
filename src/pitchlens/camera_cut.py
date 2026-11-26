@@ -42,7 +42,8 @@ def _localized_change(difference: np.ndarray, gray_before: np.ndarray) -> bool:
     regions = regions[1:]
     # A scorebug and a lower third may change together without sharing a box.
     footprints = regions[:, cv2.CC_STAT_WIDTH] * regions[:, cv2.CC_STAT_HEIGHT]
-    if footprints.sum() > 30:
+    # A second substantial change is evidence against a localized overlay.
+    if footprints.sum() > 30 or np.count_nonzero(footprints > 4) > 1:
         return False
     # Repeated mowing stripes are not distinctive two-dimensional features.
     corners = cv2.cornerMinEigenVal(gray_before, blockSize=5)
@@ -86,7 +87,12 @@ def _peak_offset(scores: np.ndarray, index: int) -> float:
         return 0.
     left, center, right = map(float, scores[index-1:index+2])
     curvature = 2 * center - left - right
-    return .5 * (right - left) / curvature if curvature > 1e-6 else 0.
+    if curvature <= 1e-6:
+        return 0.
+    offset = .5 * (right - left) / curvature
+    # Use the same precision as warpAffine's bilinear interpolation. A peak
+    # that samples as an integer must retain the integer overlap boundary.
+    return round(offset * cv2.INTER_TAB_SIZE) / cv2.INTER_TAB_SIZE
 
 
 def _continuous_translation(before: np.ndarray, after: np.ndarray, gray_before: np.ndarray,
