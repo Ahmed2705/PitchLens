@@ -136,6 +136,8 @@ Optional features require completion, integration, and testing of the core scope
 
 - The requested Codex independent review reported GPT-6.2 Sol and identified seven valid issues: output reservation, low-confidence confirmation, ball reacquisition and velocity reset, initialization order, odd-sized output and box clipping. These were addressed; the video workflow rejects odd dimensions. Spot checks of the unlabelled U19 output showed apparent ID churn in crowded play, which remains a quality limitation.
 
+- The Feature #02 and #04 hard-cut reliability update uses appearance change and motion alignment to detect shot boundaries. It resets tracker, per-track team and calibration history at the incoming frame, with disjoint numeric track ID ranges across shots. Foundation replay found all four reviewed cuts and flagged none of 197 reviewed non-cut boundaries. The full EGYPT replay matched the archived output through frame 924 and removed three stale ball extrapolations after the cut. The reserved LIV interval remained sealed. [Method and verification](TRACKING.md#hard-camera-cuts)
+
 ## Feature #03: experimental team classification baseline
 
 - Added experimental LAB torso classification, configurable clustering and JSONL/video integration without training. Referees are excluded; goalkeeper affiliation remains unknown; it was deferred until Feature #04, which is now authorized.

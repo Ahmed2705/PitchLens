@@ -7,7 +7,6 @@ import numpy as np
 
 
 _SIZE = (160, 90)
-_MIN_CHANGE = .055
 _MIN_LUMA_STD = 5.
 
 
@@ -58,15 +57,39 @@ def _continuous_motion(before: np.ndarray, after: np.ndarray, gray_before: np.nd
     return _similar_view(aligned[overlap], after[overlap], .65)
 
 
-def is_hard_cut(before: np.ndarray, after: np.ndarray, low_detail_threshold: float) -> bool:
+def _continuous_translation(before: np.ndarray, after: np.ndarray, gray_before: np.ndarray,
+                            gray_after: np.ndarray, change: float) -> bool:
+    # A view of grass and straight field markings may have no trackable corners.
+    # Match the center by translation, then check the full shared area.
+    height, width = gray_before.shape
+    margin_x, margin_y = width // 5, height // 5
+    center = gray_before[margin_y:-margin_y, margin_x:-margin_x]
+    if center.std() < _MIN_LUMA_STD:
+        return False
+    correlation = cv2.matchTemplate(gray_after, center, cv2.TM_CCOEFF_NORMED)
+    _, _, _, (x, y) = cv2.minMaxLoc(correlation)
+    dx, dy = x - margin_x, y - margin_y
+    tx, ty = max(0, dx), max(0, dy)
+    sx, sy = max(0, -dx), max(0, -dy)
+    w, h = width - abs(dx), height - abs(dy)
+    aligned, current = before[sy:sy+h, sx:sx+w], after[ty:ty+h, tx:tx+w]
+    return (cv2.absdiff(aligned, current).mean() / 255 <= .55 * change
+            and _similar_view(aligned, current, .85))
+
+
+def is_hard_cut(before: np.ndarray, after: np.ndarray, *, appearance_threshold: float,
+                low_detail_threshold: float) -> bool:
     """Separate abrupt appearance changes from shared scene structure and motion."""
+    if low_detail_threshold == 1:
+        return False
     change = cv2.absdiff(before, after).mean() / 255
-    if change < _MIN_CHANGE:
+    if change <= min(appearance_threshold, low_detail_threshold):
         return False
     gray_before, gray_after = (cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) for frame in (before, after))
     if max(gray_before.std(), gray_after.std()) < _MIN_LUMA_STD:
         # No spatial evidence is available to distinguish exposure from a new shot.
         return bool(change > low_detail_threshold)
-    if _similar_view(before, after, .94):
+    if change <= appearance_threshold or _similar_view(before, after, .94):
         return False
-    return not _continuous_motion(before, after, gray_before, gray_after)
+    return not (_continuous_motion(before, after, gray_before, gray_after)
+                or _continuous_translation(before, after, gray_before, gray_after, change))

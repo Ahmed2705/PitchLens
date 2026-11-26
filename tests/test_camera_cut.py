@@ -13,7 +13,11 @@ import numpy as np
 from pitchlens.calibration import PitchConfig, project
 from pitchlens.camera_cut import is_hard_cut, thumbnail
 from pitchlens.detector import Detection
+from pitchlens.tracking import Tracker, TrackingConfig
 from scripts import track_video
+
+
+CUT_THRESHOLDS = {"appearance_threshold": .055, "low_detail_threshold": .32}
 
 
 def scene(seed):
@@ -29,7 +33,7 @@ class CameraCutTests(unittest.TestCase):
         legacy_difference = cv2.absdiff(cv2.cvtColor(a, cv2.COLOR_BGR2GRAY),
                                         cv2.cvtColor(b, cv2.COLOR_BGR2GRAY)).mean() / 255
         self.assertLess(legacy_difference, .32)
-        self.assertTrue(is_hard_cut(a, b, .32))
+        self.assertTrue(is_hard_cut(a, b, **CUT_THRESHOLDS))
 
     def test_fast_pans_and_zoom_preserve_the_shot(self):
         before = scene(43)
@@ -43,12 +47,42 @@ class CameraCutTests(unittest.TestCase):
                 after = cv2.warpAffine(before, transform, (320, 180), borderMode=cv2.BORDER_REFLECT)
                 b = thumbnail(after)
                 self.assertGreater(cv2.absdiff(a, b).mean() / 255, .055)
-                self.assertFalse(is_hard_cut(a, b, .32))
+                self.assertFalse(is_hard_cut(a, b, **CUT_THRESHOLDS))
+
+    def test_pan_with_straight_pitch_lines_and_no_corners_preserves_the_shot(self):
+        before = np.full((90, 160, 3), (35, 145, 35), np.uint8)
+        before[:26] = 20
+        before[49:52] = 235
+        shift = np.array([[1., 0., 0.], [0., 1., 10.]])
+        after = cv2.warpAffine(before, shift, (160, 90), borderMode=cv2.BORDER_REPLICATE)
+        self.assertGreater(cv2.absdiff(before, after).mean() / 255, .055)
+        tracker = Tracker(30)
+        first = tracker.update(before, [Detection((30, 30, 50, 65), 0, .9)])
+        second = tracker.update(after, [Detection((30, 40, 50, 75), 0, .9)])
+        self.assertFalse(second.camera_cut)
+        self.assertEqual(first.tracks[0].track_id, second.tracks[0].track_id)
 
     def test_brighter_exposure_with_same_structure_stays_in_shot(self):
         before = scene(13)
         after = cv2.add(before, (48, 48, 48, 0))
-        self.assertFalse(is_hard_cut(thumbnail(before), thumbnail(after), .32))
+        self.assertFalse(is_hard_cut(thumbnail(before), thumbnail(after), **CUT_THRESHOLDS))
+
+    def test_cut_configuration_changes_sensitivity_and_can_disable_resets(self):
+        before, after = scene(13), scene(27)
+        for config, expected in (
+            (TrackingConfig(), True),
+            (TrackingConfig(cut_appearance_threshold=.32), False),
+            (TrackingConfig(cut_threshold=1.), False),
+        ):
+            with self.subTest(config=config):
+                tracker = Tracker(30, config)
+                tracker.update(before, [])
+                self.assertEqual(tracker.update(after, []).camera_cut, expected)
+        tracker = Tracker(30, TrackingConfig(cut_appearance_threshold=1., cut_threshold=.1))
+        tracker.update(np.full_like(before, 40), [])
+        self.assertTrue(tracker.update(np.full_like(before, 80), []).camera_cut)
+        with self.assertRaises(ValueError):
+            TrackingConfig(cut_appearance_threshold=0.)
 
     def test_runner_resets_ball_people_team_and_homography_at_each_cut(self):
         before, after = scene(13), scene(27)

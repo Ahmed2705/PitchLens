@@ -24,9 +24,11 @@ class TrackingConfig:
     ball_gate_fraction: float = 0.08
     cut_threshold: float = 0.32
     trajectory_seconds: float = 1.0
+    cut_appearance_threshold: float = 0.055
 
     def __post_init__(self):
-        for name in ('person_low', 'person_high', 'person_new', 'person_match', 'ball_confidence', 'ball_gate_fraction', 'cut_threshold'):
+        for name in ('person_low', 'person_high', 'person_new', 'person_match', 'ball_confidence',
+                     'ball_gate_fraction', 'cut_threshold', 'cut_appearance_threshold'):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= 1:
                 raise ValueError(f'{name} must be finite and in (0, 1]')
@@ -100,7 +102,9 @@ class Tracker:
             if not isinstance(d, Detection) or isinstance(d.class_id, bool) or d.class_id not in range(4) or not math.isfinite(d.confidence) or not 0 <= d.confidence <= 1 or len(d.xyxy) != 4 or not all(math.isfinite(x) for x in d.xyxy) or not (0 <= d.xyxy[0] < d.xyxy[2] <= w and 0 <= d.xyxy[1] < d.xyxy[3] <= h):
                 raise ValueError('invalid detection')
         small = thumbnail(frame)
-        cut = self.previous is not None and is_hard_cut(self.previous, small, self.config.cut_threshold)
+        cut = self.previous is not None and is_hard_cut(
+            self.previous, small, appearance_threshold=self.config.cut_appearance_threshold,
+            low_detail_threshold=self.config.cut_threshold)
         if cut:
             self.segment += 1
             self.track_id_offset = self.largest_track_id
