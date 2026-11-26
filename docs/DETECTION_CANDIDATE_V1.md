@@ -44,6 +44,42 @@ At the operating threshold, 31 of 54 balls were missed and 12 ball predictions w
 
 The 20 Persija–PSS Sleman frames account for 565 of the 602 predicted players unmatched to any label at IoU 0.50. Player precision was 18.3% on this source, versus 96.9% and 89.8% on the two legacy validation groups. Four high-error frames showed multiple detections on individual athletes and predictions on graphics or off-pitch people. The run stores the group matrices in `validation-by-group.json` and the four annotated diagnostic frames in `validation-label-diagnostic.jpg`. This sample does not establish label completeness or isolate how much each factor contributed.
 
+## Annotation review and training gate
+
+**Blocked before CUDA training smoke test and full training.** The review found missing visible players in development and training, a missing visible goalkeeper in development, and ball boxes with substantial padding in both sources. These defects affect training targets or how detections are scored. Candidate v1 requires manual correction and verification before training.
+
+The review covered all 20 retained Persija–PSS Sleman development frames and 16 of 113 retained Chelsea–Burnley training frames, selected at eight evenly spaced chronological positions in each half. Each prepared image and label matched the development manifest hashes. The corresponding raw images and labels also matched their recorded hashes. Visual inspection used the exported 640 × 640 images with and without label overlays. Baseline predictions at 960 pixels, confidence 0.25 and IoU 0.50 were used to diagnose discrepancies. The existing checkpoint hash matched the recorded baseline.
+
+| Reviewed source | Frames | Labeled players | Matched players | Player predictions unmatched to any label | Ball labels | Matched balls |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Persija–PSS Sleman development | 20 | 226 | 128 | 565 | 20 | 2 |
+| Chelsea–Burnley training sample | 16 | 207 | 136 | 233 | 16 | 1 |
+
+The Persija player count reproduced the saved baseline confusion matrix. Where the cause could be judged visually, the review found several distinct failure modes.
+
+- **Detector errors.** In Persija frame `10020`, the detector put at least eight player boxes on the Vidio watermark and several partial boxes on the torso and legs of the same labeled foreground player near (313, 575). In frame `13020`, it put a player box on a steward behind the advertising boards. In Chelsea first-half frame `30960`, it predicted a player on the Premier League watermark and a ball at the penalty spot while the match ball was next to a Chelsea player.
+- **Missing or merged targets.** Persija frame `13020` also has a separate unboxed white-shirted player. Chelsea first-half frame `21360` has an unboxed Burnley player near the left edge and a corresponding player prediction with confidence 0.87. In Chelsea second-half frame `0720`, a single player box overlaps two distinct players by the near touchline.
+- **Ball box extent.** The detector localized the visible match ball in Persija frame `10020` and Chelsea first-half frame `30960`, but the annotation extended well beyond the visible ball. The overlaps were 0.295 and 0.428 respectively, so each prediction counted as a false positive and each label as a miss at IoU 0.50. Chelsea second-half frame `29760` showed a similar extent disagreement at IoU 0.468, with more motion blur. These examples do not establish how much of the aggregate ball error is due to annotation.
+
+Manual verification should start with these examples. Coordinates are approximate pixel locations in the exported frame, measured from the top-left.
+
+| Source and frame | What to verify |
+| --- | --- |
+| Persija `10920`, `10980` | The white-shirted player on the ground near (322, 435) and (336, 435) has no player box in either frame. |
+| Persija `12720` | The yellow goalkeeper near (437, 363) and the white-shirted player near (543, 401) have no separate boxes. |
+| Persija `12780`, `13020` | A white-shirted player overlaps a red-shirted player without a separate box near (339, 514) and (460, 365), respectively. |
+| Persija `13080` | White-shirted players near (170, 429) and (538, 385) lack individual boxes. |
+| Persija `12720`–`14040` goal-area views | Check the role of the black-clad person near the goal line against the frame sequence before assigning any class. |
+| Chelsea first half `21360` | The Burnley player near (19, 172) has no box. Also check the vertically padded ball box near (361, 516). |
+| Chelsea first half `46920` and second half `0720` | Separate the overlapping players near (126, 355) and (105, 407), respectively, if both visible instances are confirmed. |
+| Persija `10020`, Chelsea first half `30960` and second half `29760` | Review match-ball extent near (376, 250), (485, 377) and (443, 430), respectively. |
+
+Before reopening the training gate, manually review the 20 Persija frames and the full 113-frame Chelsea subset using a consistent rule for visible portions of overlapping, fallen and clipped players, match officials and the active ball. Use the source footage or adjacent frames for ambiguous roles and ball locations where available. Preserve the original exports and write verified corrections to a versioned candidate. Recompute the 960-pixel baseline on its corrected development labels before comparing a new checkpoint. The examples above are a focused finding list, and the unmatched totals have not been adjudicated box by box.
+
+The review files are local under `runs/detection-candidate-v1-annotation-review`. `frames.json` maps review IDs to manifest paths, coordinates and per-frame confusion counts. `P01.jpg` through `P20.jpg` and `C01.jpg` through `C16.jpg` show the image, labels and disputed predictions side by side. On the overlays, player labels are green, goalkeeper labels orange, referee labels cyan and ball labels white. Disputed predictions are magenta or violet. No labels were changed by the review. No candidate checkpoint or candidate metrics were produced. The reserved test and IFAP sets were not opened.
+
+The repository's full `unittest` suite passed all 67 tests.
+
 ## Reproduce and verify
 
 Run from the project root with the pinned project environment and new output paths. The audit and raw exports remain in external storage.
@@ -67,6 +103,6 @@ The full unit suite passed all 67 tests. An independent artifact check verified 
 
 ## Recommended training configuration
 
-After approval, start with the official pretrained YOLO26s weights and the existing [640-pixel configuration](../configs/detection_train.json). Run a CUDA and AMP smoke check on the RTX 2060 SUPER before the full run. Use seed 42, deterministic settings, automatic batch and optimizer, a 100-epoch ceiling, patience 20 and the checked-in augmentations. Start from the same pretrained weights as the legacy baseline to make the dataset comparison easier to interpret.
+After the annotation gate passes, start with the official pretrained YOLO26s weights and the existing [640-pixel configuration](../configs/detection_train.json). Run a CUDA and AMP smoke check on the RTX 2060 SUPER before the full run. Use seed 42, deterministic settings, automatic batch and optimizer, a 100-epoch ceiling, patience 20 and the checked-in augmentations. Start from the same pretrained weights as the legacy baseline to make the dataset comparison easier to interpret.
 
 Use development validation for checkpoint and threshold selection. Compare per-class AP, ball recall by size, and goalkeeper and referee confusions by source. Consider a 960-pixel training comparison only after a memory smoke test and a specific gain target for small-ball recall. Keep the reserved test sealed until selection is final and report IFAP results separately.
