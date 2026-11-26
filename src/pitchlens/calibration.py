@@ -6,6 +6,8 @@ import math
 import cv2
 import numpy as np
 
+from pitchlens.pitch_lines import PitchLineCheck
+
 
 @dataclass(frozen=True)
 class PitchConfig:
@@ -124,13 +126,15 @@ class Calibration:
 class PitchCalibrator:
     """Robustly fit in pixels, then smooth only against verified current evidence."""
 
-    def __init__(self, config: PitchConfig):
+    def __init__(self, config: PitchConfig, *, legacy_validation: bool = False):
         self.config = config
         self.world = config.landmarks()
+        self.legacy_validation = legacy_validation
+        self.line_check = None if legacy_validation else PitchLineCheck(self.world)
         self.previous: np.ndarray | None = None
 
     def update(self, observations: np.ndarray | None, shape: tuple[int, ...],
-               camera_cut: bool = False) -> Calibration:
+               camera_cut: bool = False, *, frame: np.ndarray | None = None) -> Calibration:
         previous = None if camera_cut else self.previous
         self.previous = None
         height, width = shape[:2]
@@ -164,6 +168,23 @@ class PitchCalibrator:
             return Calibration(config, frame_size, candidates=count, inliers=inliers, reason='poor_spatial_support')
         if not has_projective_support(world, image):
             return Calibration(config, frame_size, candidates=count, inliers=inliers, reason='ambiguous_geometry')
+        if not self.legacy_validation:
+            if (cv2.contourArea(hull) < 0.03 * width * height
+                    or world_area < 0.03 * config.length_m * config.width_m):
+                return Calibration(config, frame_size, candidates=count, inliers=inliers,
+                                   reason='concentrated_support')
+            # A hull vertex with high leverage can make a small residual misleading.
+            # Predict it without its own correspondence before trusting the fit.
+            for index in cv2.convexHull(image.astype(np.float32), returnPoints=False).ravel():
+                keep = np.arange(inliers) != index
+                control, _ = cv2.findHomography(world[keep], image[keep], 0)
+                if control is None:
+                    return Calibration(config, frame_size, candidates=count, inliers=inliers,
+                                       reason='unstable_support')
+                error = np.linalg.norm(project(control, world[index:index + 1])[0] - image[index])
+                if not np.isfinite(error) or error > 3 * threshold:
+                    return Calibration(config, frame_size, candidates=count, inliers=inliers,
+                                       reason='unstable_support')
 
         def quality(candidate: np.ndarray) -> tuple[np.ndarray, float] | None:
             # A horizon through the support or an ill-conditioned local mapping is unsafe.
@@ -197,6 +218,16 @@ class PitchCalibrator:
         result = quality(matrix)
         if result is None:
             return Calibration(config, frame_size, candidates=count, inliers=inliers, reason='unreliable_geometry')
+
+        def paint_rejection(candidate: np.ndarray) -> str | None:
+            if frame is None or self.line_check is None:
+                return None
+            depth_sign = np.sign(candidate[2] @ [*world[0], 1])
+            return self.line_check.rejection(frame, candidate, depth_sign)
+
+        reason = paint_rejection(matrix)
+        if reason is not None:
+            return Calibration(config, frame_size, candidates=count, inliers=inliers, reason=reason)
         stabilized = False
         if previous is not None and config.smoothing:
             current = project(matrix, world)
@@ -205,7 +236,7 @@ class PitchCalibrator:
                 blended = current + config.smoothing * (prior - current)
                 smoothed, _ = cv2.findHomography(world, blended, 0)
                 checked = quality(smoothed) if smoothed is not None else None
-                if checked is not None:
+                if checked is not None and paint_rejection(smoothed) is None:
                     matrix, result, stabilized = smoothed, checked, True
         self.previous = matrix
         inverse, rmse = result

@@ -5,19 +5,13 @@ import math
 import cv2
 import numpy as np
 
+from pitchlens.pitch_lines import STRAIGHT_MARKINGS
+
 
 def planar_markings(config):
     """Named world polylines, with x from left to right and y from top to bottom."""
     vertices = config.landmarks()
-    lines = {
-        'Side line top': (1, 25), 'Side line bottom': (6, 30),
-        'Side line left': (1, 6), 'Side line right': (25, 30), 'Middle line': (14, 17),
-        'Big rect. left top': (2, 10), 'Big rect. left main': (10, 13), 'Big rect. left bottom': (5, 13),
-        'Big rect. right top': (26, 18), 'Big rect. right main': (18, 21), 'Big rect. right bottom': (29, 21),
-        'Small rect. left top': (3, 7), 'Small rect. left main': (7, 8), 'Small rect. left bottom': (4, 8),
-        'Small rect. right top': (27, 23), 'Small rect. right main': (23, 24), 'Small rect. right bottom': (28, 24),
-    }
-    markings = {name: vertices[np.array(ids) - 1] for name, ids in lines.items()}
+    markings = {name: vertices[np.array(ids) - 1] for name, ids in STRAIGHT_MARKINGS.items()}
     radius = 9.15
     arc_angle = math.acos((16.5 - 11) / radius)
     mid = np.array([config.length_m, config.width_m]) / 2

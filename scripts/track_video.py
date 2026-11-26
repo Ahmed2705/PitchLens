@@ -114,7 +114,8 @@ def main():
                 for item, team in zip(record['tracks'], assignments):
                     item['team'] = team
                 if args.pitch_weights:
-                    calibration = calibrator.update(landmark_detector.detect(frame), frame.shape, tracked.camera_cut)
+                    calibration = calibrator.update(landmark_detector.detect(frame), frame.shape,
+                                                    camera_cut=tracked.camera_cut, frame=frame)
                     metadata = calibration.metadata()
                     record['calibration'] = metadata
                     pitch_frames += metadata['valid']

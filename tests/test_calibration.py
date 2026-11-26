@@ -1,8 +1,10 @@
 import unittest
 
+import cv2
 import numpy as np
 
 from pitchlens.calibration import PitchCalibrator, PitchConfig, project
+from pitchlens.pitch_lines import STRAIGHT_MARKINGS
 from pitchlens.pitch_minimap import PitchMinimap
 
 
@@ -17,6 +19,58 @@ class PitchCalibrationTests(unittest.TestCase):
     def observe(self, camera=None):
         return np.column_stack((project(self.camera if camera is None else camera, self.world),
                                 np.full(len(self.world), 0.95)))
+
+    def painted_frame(self):
+        frame = np.full(self.shape, (45, 110, 55), dtype=np.uint8)
+        for ids in STRAIGHT_MARKINGS.values():
+            points = project(self.camera, self.world[np.array(ids) - 1])
+            start, end = np.rint(points).astype(int)
+            cv2.line(frame, start, end, (220, 225, 220), 2)
+        return frame
+
+    def test_concentrated_landmarks_reject_an_exact_fit(self):
+        camera = np.array([[3., 0., 400.], [0., 3., 200.], [0., 0., 1.]])
+        points = self.observe(camera)
+        points[self.world[:, 0] > 16.5, 2] = 0
+        baseline = PitchCalibrator(self.config, legacy_validation=True).update(points, self.shape)
+        self.assertTrue(baseline.metadata()['valid'])
+        self.assertLess(baseline.reprojection_rmse_px, 0.01)
+        result = self.calibrator.update(points, self.shape)
+        self.assertEqual(result.reason, 'concentrated_support')
+        self.assertEqual(result.map_contact((410, 230, 420, 250)), {'xy_m': None, 'status': 'unavailable'})
+
+    def test_low_residual_fit_with_high_leverage_is_rejected(self):
+        camera = self.camera.copy()
+        camera[:2, :2] *= 1.4
+        points = self.observe(camera)
+        ids = [1, 3, 7, 21, 23, 26, 30]
+        points[:, 2] = 0
+        points[ids, 2] = 0.95
+        points[ids, :2] += [[-3.64, 0.81], [-1.15, 0.8], [0.6, 0.36], [1.84, 1.11],
+                            [0.94, -1.79], [3.45, 0.25], [2.21, 0.65]]
+        baseline = PitchCalibrator(self.config, legacy_validation=True).update(points, self.shape)
+        self.assertLess(baseline.reprojection_rmse_px, 1)
+        self.assertEqual(self.calibrator.update(points, self.shape).reason, 'unstable_support')
+
+    def test_paint_rejects_consistently_shifted_landmarks_and_clears_history(self):
+        frame = self.painted_frame()
+        points = self.observe()
+        self.assertTrue(self.calibrator.update(points, self.shape, frame=frame).metadata()['valid'])
+        self.assertTrue(self.calibrator.update(points, self.shape, frame=frame).stabilized)
+        shifted = points.copy()
+        shifted[:, :2] += [9, 10]
+        baseline = PitchCalibrator(self.config, legacy_validation=True).update(shifted, self.shape)
+        self.assertLess(baseline.reprojection_rmse_px, 0.01)
+        result = self.calibrator.update(shifted, self.shape, frame=frame)
+        self.assertEqual(result.reason, 'contradictory_paint')
+        self.assertFalse(self.calibrator.update(points, self.shape, frame=frame).stabilized)
+        self.assertFalse(self.calibrator.update(points, self.shape, camera_cut=True, frame=frame).stabilized)
+
+    def test_frame_with_no_painted_evidence_is_unavailable(self):
+        frame = np.full(self.shape, (40, 100, 50), dtype=np.uint8)
+        result = self.calibrator.update(self.observe(), self.shape, frame=frame)
+        self.assertEqual(result.reason, 'insufficient_paint')
+        self.assertIsNone(result.image_to_pitch)
 
     def test_recovers_contact_despite_outlier(self):
         points = self.observe()

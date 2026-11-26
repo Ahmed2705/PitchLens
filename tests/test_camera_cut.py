@@ -13,6 +13,7 @@ import numpy as np
 from pitchlens.calibration import PitchConfig, project
 from pitchlens.camera_cut import is_hard_cut, thumbnail
 from pitchlens.detector import Detection
+from pitchlens.pitch_lines import STRAIGHT_MARKINGS
 from pitchlens.tracking import Tracker, TrackingConfig
 from scripts import track_video
 
@@ -146,6 +147,19 @@ class CameraCutTests(unittest.TestCase):
 
     def test_runner_resets_ball_people_team_and_homography_at_each_cut(self):
         before, after = scene(13), scene(27)
+        world = PitchConfig().landmarks()
+        camera = np.array([[2., 0., 30.], [0., 2., 20.], [0., 0., 1.]])
+        projected_before = project(camera, world)
+        projected_after = projected_before + [1., 0.]
+        # Keep the different seeded textures while giving the calibrator
+        # corroborating paint and green shoulders in both shots.
+        for frame, projected in ((before, projected_before), (after, projected_after)):
+            frame[..., 0] //= 2
+            frame[..., 2] //= 2
+            frame[..., 1] = np.maximum(frame[..., 1], 115)
+            for ids in STRAIGHT_MARKINGS.values():
+                start, end = projected[np.array(ids) - 1].round().astype(int)
+                cv2.line(frame, start, end, (230, 230, 230), 1)
         players = []
         for index in range(6):
             x = index * 45 + 5
@@ -165,11 +179,8 @@ class CameraCutTests(unittest.TestCase):
         frames = [before, before, after, after, before]
         capture.read.side_effect = [(True, frame.copy()) for frame in frames] + [(False, None)]
 
-        world = PitchConfig().landmarks()
-        camera = np.array([[2., 0., 30.], [0., 2., 20.], [0., 0., 1.]])
-        points_before = np.column_stack((project(camera, world), np.full(len(world), .95)))
-        points_after = points_before.copy()
-        points_after[:, 0] += 1.
+        points_before = np.column_stack((projected_before, np.full(len(world), .95)))
+        points_after = np.column_stack((projected_after, np.full(len(world), .95)))
         landmark_detector = Mock()
         landmark_detector.detect.side_effect = [points_before, points_before, points_after, points_after, None]
 

@@ -1,4 +1,4 @@
-"""Compare pitch templates with frozen v9 predictions on local inputs."""
+"""Compare pitch template or validation variants with frozen v9 predictions."""
 
 import argparse
 from collections import Counter
@@ -24,10 +24,13 @@ VARIANTS = ('original', 'corrected')
 SOCCERNET_IMAGES = 3212
 
 
-def compare_calibrators(config):
-    original = PitchCalibrator(config)
+def compare_calibrators(config, reliability=False):
+    corrected = PitchCalibrator(config, legacy_validation=True)
+    if reliability:
+        return {'corrected': corrected, 'validated': PitchCalibrator(config)}
+    original = PitchCalibrator(config, legacy_validation=True)
     original.world[ARC_INDICES, 1] = config.width_m / 2 + np.tile([-9.16, 9.16], 2)
-    return {'original': original, 'corrected': PitchCalibrator(config)}
+    return {'original': original, 'corrected': corrected}
 
 
 def roboflow_labels(data, width, height):
@@ -66,7 +69,7 @@ def label_diagnostics(points, visible, observations, shape, pair):
     check = np.zeros(32, dtype=bool)
     check[ARC_INDICES] = visible[ARC_INDICES]
     control[ARC_INDICES, 2] = 0
-    oracle = PitchCalibrator(config).update(control, shape)
+    oracle = PitchCalibrator(config, legacy_validation=True).update(control, shape)
     result = {'visible_ids': (np.flatnonzero(visible) + 1).tolist(), 'raw_px': raw,
               'control': oracle.metadata(), 'held_out_arc_px': {}, 'label_fit': {}}
     annotations = np.column_stack((points, visible))
@@ -87,7 +90,7 @@ def compare_frame(detector, frame, pair, cut=False, expected=None, markings=None
     if expected is not None:
         row['annotation'], available = label_diagnostics(*expected, observations, frame.shape, pair)
     for name, calibrator in pair.items():
-        fit = calibrator.update(observations, frame.shape, camera_cut=cut)
+        fit = calibrator.update(observations, frame.shape, camera_cut=cut, frame=frame)
         result = row[name] = fit.metadata()
         result['image_to_pitch'] = None
         if fit.image_to_pitch is not None:
@@ -117,15 +120,17 @@ def percentile(values, percent):
     return ordered[int(np.ceil(len(values) * percent / 100)) - 1]
 
 
-def summarize(rows, mode):
+def summarize(rows, mode, variants=VARIANTS):
     def errors(items, field):
         return [value for item in items for value in item.get(field, {}).values()]
 
+    before, after = variants
     summary = {'frames': len(rows), 'cuts': [row['id'] for row in rows if row['cut']],
+               'variants': list(variants),
                'paired': dict(Counter(
-                   f"{int(row['original']['valid'])}/{int(row['corrected']['valid'])}" for row in rows))}
-    common = [row for row in rows if all(row[name]['valid'] for name in VARIANTS)]
-    for name in VARIANTS:
+                   f"{int(row[before]['valid'])}/{int(row[after]['valid'])}" for row in rows))}
+    common = [row for row in rows if all(row[name]['valid'] for name in variants)]
+    for name in variants:
         items = [row[name] for row in rows]
         accepted = [item for item in items if item['valid']]
         summary[name] = {
@@ -135,12 +140,16 @@ def summarize(rows, mode):
             'inlier_rmse_px': distribution([item['reprojection_rmse_px'] for item in accepted]),
         }
         if mode == 'roboflow':
-            annotations = [row['annotation'] for row in rows]
+            if name in VARIANTS:
+                summary[name]['annotation_fit_accepted'] = sum(
+                    row['annotation']['label_fit'][name]['valid'] for row in rows)
+                summary[name]['held_out_arc_px'] = {
+                    str(index + 1): distribution([
+                        row['annotation']['held_out_arc_px'][name][str(index + 1)] for row in rows
+                        if str(index + 1) in row['annotation']['held_out_arc_px'].get(name, {})])
+                    for index in ARC_INDICES
+                }
             summary[name].update({
-                'annotation_fit_accepted': sum(row['label_fit'][name]['valid'] for row in annotations),
-                'held_out_arc_px': {str(index + 1): distribution([
-                    row['held_out_arc_px'][name][str(index + 1)] for row in annotations
-                    if str(index + 1) in row['held_out_arc_px'].get(name, {})]) for index in ARC_INDICES},
                 'label_px': distribution(errors(accepted, 'label_px')),
                 'common_label_px': distribution(errors([row[name] for row in common], 'label_px')),
                 'unobserved_label_px': distribution(errors(accepted, 'unobserved_label_px')),
@@ -176,6 +185,24 @@ def summarize(rows, mode):
                                          if str(index) in row['raw_px']])}
             for index in range(1, 33)
         }
+        if after == 'validated':
+            # Absolute image error on labels that never entered either input fit.
+            # Count failures as over threshold and require at least three checks per image.
+            def gross_errors(name, selected):
+                medians = [percentile(list(row[name]['unobserved_label_px'].values()), 50)
+                           for row in selected if len(row[name].get('unobserved_label_px', {})) >= 3]
+                return {'images': len(medians),
+                        'over_50_px': sum(value is None or value > 50 for value in medians)}
+
+            dropped = [row for row in rows if row[before]['valid'] and not row[after]['valid']]
+            summary['rejected_baseline'] = {
+                'label_px': distribution(errors([row[before] for row in dropped], 'label_px')),
+                'unobserved_label_px': distribution(errors([row[before] for row in dropped],
+                                                               'unobserved_label_px')),
+                'gross_errors': gross_errors(before, dropped),
+            }
+            for name in variants:
+                summary[name]['gross_errors'] = gross_errors(name, rows)
     return summary
 
 
@@ -267,13 +294,15 @@ def video_rows(args, detector, pair, decoding):
         capture.release()
 
 
-def video_overlays(path, output, rows, markings):
+def video_overlays(path, output, rows, markings, variants=VARIANTS, include=()):
     """Save a regular sample plus disagreements, sparse fits and cut neighborhoods."""
     selected = set(np.linspace(0, len(rows) - 1, min(12, len(rows)), dtype=int))
+    selected.update(index for index in include if 0 <= index < len(rows))
+    baseline, candidate = variants
     for before, after in [(True, False), (False, True), (True, True), (False, False)]:
-        choices = [row['id'] for row in rows if row['original']['valid'] == before
-                   and row['corrected']['valid'] == after
-                   and (before != after or row['corrected']['landmarks'] <= 7)]
+        choices = [row['id'] for row in rows if row[baseline]['valid'] == before
+                   and row[candidate]['valid'] == after
+                   and (before != after or row[candidate]['landmarks'] <= 7)]
         if choices:
             selected.update(choices[index] for index in np.linspace(0, len(choices) - 1, 6, dtype=int))
     for row in rows:
@@ -289,7 +318,7 @@ def video_overlays(path, output, rows, markings):
             if row['id'] not in selected:
                 continue
             panels = []
-            for name in VARIANTS:
+            for name in variants:
                 item = row[name]
                 panel = frame.copy()
                 draw_markings(panel, markings, item)
@@ -320,18 +349,26 @@ def main():
     parser.add_argument('--output', type=Path, required=True, help='New local output directory')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cuda')
     parser.add_argument('--stop-before', type=int, help='Exclusive video frame limit')
+    parser.add_argument('--reliability', action='store_true',
+                        help='Compare corrected-template baseline with new validation on development inputs')
+    parser.add_argument('--overlay-frame', type=int, action='append', default=[],
+                        help='Include a zero-based frame in the video comparison overlays')
     args = parser.parse_args()
     if (args.audit is not None) != (args.mode == 'roboflow'):
         parser.error('--audit is required in roboflow mode and valid only in that mode')
     if args.stop_before is not None and (args.mode != 'video' or args.stop_before < 1):
         parser.error('--stop-before must be a positive frame index in video mode')
+    if args.reliability and args.mode == 'soccernet':
+        parser.error('--reliability is available only for development inputs')
+    if args.overlay_frame and (args.mode != 'video' or min(args.overlay_frame) < 0):
+        parser.error('--overlay-frame requires a nonnegative video frame index')
 
     # Configure local Ultralytics paths before loading the same model as the runner.
     from pitchlens.detector import Detector  # noqa: F401
     from pitchlens.pitch_landmarks import CHECKPOINT_SHA256, PitchLandmarkDetector
 
     config = PitchConfig()
-    pair = compare_calibrators(config)
+    pair = compare_calibrators(config, args.reliability)
     markings = planar_markings(config)
     detector = PitchLandmarkDetector(args.weights, args.device)
     args.output.mkdir()
@@ -354,8 +391,8 @@ def main():
             raise ValueError(f'Video ended before the requested frame limit: {decoding}')
         if decoding['status'] not in ('complete', 'frame_limit'):
             warnings.warn(f'Video coverage is unverified: {decoding}', stacklevel=1)
-        video_overlays(args.input, args.output, rows, markings)
-    report = summarize(rows, args.mode)
+        video_overlays(args.input, args.output, rows, markings, tuple(pair), args.overlay_frame)
+    report = summarize(rows, args.mode, tuple(pair))
     if args.mode == 'video':
         report['video_decode'] = decoding
     if args.mode == 'soccernet':

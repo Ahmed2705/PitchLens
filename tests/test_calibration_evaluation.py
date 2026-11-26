@@ -57,6 +57,19 @@ class CalibrationEvaluationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             roboflow_labels('0 1', 960, 540)
 
+    def test_reliability_uses_corrected_geometry_and_current_pixels(self):
+        pair = compare_calibrators(self.config, reliability=True)
+        np.testing.assert_array_equal(pair['corrected'].world, pair['validated'].world)
+        points = project(self.camera, self.world)
+        observations = np.column_stack((points, np.ones(32)))
+        detector = Mock()
+        detector.detect.return_value = observations
+        row = compare_frame(detector, self.frame, pair)
+        detector.detect.assert_called_once()
+        self.assertTrue(row['corrected']['valid'])
+        self.assertEqual(row['validated']['reason'], 'insufficient_paint')
+        self.assertIsNone(row['validated']['image_to_pitch'])
+
     def test_planar_labels_clamp_deduplicate_and_exclude_unmodeled_points(self):
         raw = {
             'Middle line': [{'x': -0.001, 'y': 0.5}, {'x': 0, 'y': 0.5},
