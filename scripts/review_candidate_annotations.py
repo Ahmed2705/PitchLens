@@ -10,15 +10,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import re
-import shutil
 from tempfile import TemporaryDirectory
 from threading import Lock
+from uuid import uuid4
 
 PROJECT = Path(__file__).resolve().parents[1]
 MANIFEST_SHA256 = "739efbbad75d9021100e24d188e1895689004a84cfa7e7dd3ad3bdaaab495a5b"
 SIZE = 640
 CLASSES = ("player", "goalkeeper", "referee", "ball")
 STATUSES = ("unreviewed", "reviewed", "uncertain")
+EXPORT_COMPLETE = "_COMPLETE"
 GROUPS = ("Persija · validation", "Chelsea · first half", "Chelsea · second half")
 
 # Approximate pixel locations from the documented manual review. These markers
@@ -154,35 +155,36 @@ class Review:
     def export(self) -> Path:
         drafts = self.state["drafts"]
         statuses = {key: drafts.get(key, {}).get("status", "unreviewed") for key in self.frames}
-        reviewed = [key for key, status in statuses.items() if status == "reviewed"]
-        if not reviewed:
+        if "reviewed" not in statuses.values():
             raise ValueError("Mark at least one frame reviewed before exporting.")
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        destination = self.work / f"export-{stamp}"
-        # Stage beside the final export so the files inherit the workspace's
-        # permissions on Windows and can be read outside the editor.
-        payload = self.work / f".{destination.name}.tmp"
-        payload.mkdir()
+        destination = self.work / f"export-{stamp}-{uuid4().hex[:8]}"
+        # Claim a fresh directory. Windows can deny renaming a directory if
+        # another process has any of its files open. Write in place and use a
+        # completion marker after all files have been closed.
+        destination.mkdir(exist_ok=False)
         try:
             records = []
             for key, frame in self.frames.items():
                 record = {"frame_id": key, "status": statuses[key]}
                 if statuses[key] == "reviewed":
-                    path = payload / frame["label_path"]
+                    path = destination / frame["label_path"]
                     path.parent.mkdir(parents=True, exist_ok=True)
                     boxes = drafts[key]["boxes"]
                     changed = boxes != frame["boxes"]
-                    path.write_bytes(format_yolo(boxes) if changed else self.labels[key])
+                    label = format_yolo(boxes) if changed else self.labels[key]
+                    if changed:
+                        parse_yolo(label)
+                    path.write_bytes(label)
                     record.update(label_path=frame["label_path"], changed=changed)
                 records.append(record)
-            (payload / "review.json").write_text(json.dumps({
+            (destination / "review.json").write_text(json.dumps({
                 "manifest_sha256": MANIFEST_SHA256, "progress_revision": self.state["revision"],
                 "classes": CLASSES, "frames": records,
             }, indent=2) + "\n", encoding="utf-8")
-            payload.rename(destination)
-        except BaseException:
-            shutil.rmtree(payload, ignore_errors=True)
-            raise
+            (destination / EXPORT_COMPLETE).touch(exist_ok=False)
+        except (OSError, ValueError) as exc:
+            raise OSError(f"Export incomplete. Partial files kept in {destination}. {exc}") from exc
         return destination
 
 

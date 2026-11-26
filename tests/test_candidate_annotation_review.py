@@ -1,11 +1,13 @@
 """Exercise the annotation review without requiring local dataset media."""
 
 from hashlib import sha256
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+from uuid import UUID
 
 from scripts import review_candidate_annotations as tool
 
@@ -65,6 +67,7 @@ class AnnotationReviewTests(unittest.TestCase):
         self.assertEqual(resumed.state["drafts"], state["drafts"])
         first_export = resumed.export()
         self.assertNotEqual(first_export, resumed.export())
+        self.assertTrue((first_export / tool.EXPORT_COMPLETE).is_file())
         first_label = self.review.frames[first]["label_path"]
         self.assertEqual(tool.parse_yolo((first_export / first_label).read_bytes()), [[3, 0, 0, 4, 6]])
         self.assertEqual((self.data / first_label).read_bytes(), self.original)
@@ -73,6 +76,42 @@ class AnnotationReviewTests(unittest.TestCase):
         summary = json.loads((first_export / "review.json").read_bytes())
         self.assertEqual([record["status"] for record in summary["frames"][:4]],
                          ["reviewed", "uncertain", "reviewed", "unreviewed"])
+
+    def test_failed_export_keeps_files_and_next_attempt_preserves_them(self):
+        key = self.review.state["cursor"]
+        self.review.save({**self.review.state, "drafts": {key: {
+            "status": "reviewed", "boxes": [[2, 0, 10, 640, 640]],
+        }}})
+        progress = self.review.progress.read_bytes()
+        with patch.object(Path, "touch", side_effect=PermissionError("simulated Windows denial")):
+            with self.assertRaisesRegex(OSError, "Partial files kept.*simulated Windows denial"):
+                self.review.export()
+        partial, = self.work.glob("export-*")
+        label = self.review.frames[key]["label_path"]
+        self.assertTrue((partial / "review.json").is_file())
+        self.assertFalse((partial / tool.EXPORT_COMPLETE).exists())
+        self.assertEqual(tool.parse_yolo((partial / label).read_bytes()), [[2, 0, 10, 640, 640]])
+        complete = self.review.export()
+        self.assertNotEqual(partial, complete)
+        self.assertEqual((partial / label).read_bytes(), (complete / label).read_bytes())
+        self.assertFalse((partial / tool.EXPORT_COMPLETE).exists())
+        self.assertTrue((complete / tool.EXPORT_COMPLETE).is_file())
+        self.assertEqual(self.review.progress.read_bytes(), progress)
+
+    def test_export_refuses_existing_destination(self):
+        key = self.review.state["cursor"]
+        self.review.save({**self.review.state, "drafts": {key: {
+            "status": "reviewed", "boxes": self.review.frames[key]["boxes"],
+        }}})
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with patch.object(tool, "datetime") as clock, patch.object(tool, "uuid4", return_value=UUID(int=0)):
+            clock.now.return_value = now
+            first = self.review.export()
+            report = (first / "review.json").read_bytes()
+            with self.assertRaises(FileExistsError):
+                self.review.export()
+        self.assertEqual(list(self.work.glob("export-*")), [first])
+        self.assertEqual((first / "review.json").read_bytes(), report)
 
     def test_rejects_invalid_or_stale_saves_and_dataset_output(self):
         with self.assertRaisesRegex(ValueError, "separate"):
