@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 assisted = ["transformers==5.24.1"]
+teams = ["transformers==5.24.1", "umap-learn==0.6.0", "scikit-learn==1.9.1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

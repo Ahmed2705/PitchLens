@@ -37,12 +37,13 @@ def normalized(features):
 
 class SiglipEncoder:
     """Load the user's local pretrained vision model, never accessing the network."""
-    def __init__(self, snapshot, device='cpu', batch_size=16):
+    def __init__(self, snapshot, device='cpu', batch_size=16, *, mean_pool=False):
         import torch
         from transformers import AutoImageProcessor, SiglipVisionModel
         self.torch = torch
         self.device = device
         self.batch_size = batch_size
+        self.mean_pool = mean_pool
         self.processor = AutoImageProcessor.from_pretrained(snapshot, local_files_only=True)
         model, loading = SiglipVisionModel.from_pretrained(snapshot, local_files_only=True, output_loading_info=True)
         if loading.get('missing_keys') or loading.get('mismatched_keys') or loading.get('error_msgs'):
@@ -56,7 +57,8 @@ class SiglipEncoder:
             imgs = [Image.fromarray(cv2.cvtColor(x, cv2.COLOR_BGR2RGB)) for x in crops[i:i+self.batch_size]]
             inputs = self.processor(images=imgs, return_tensors='pt').to(self.device)
             with self.torch.inference_mode():
-                features = self.model(**inputs).pooler_output
+                output = self.model(**inputs)
+                features = output.last_hidden_state.mean(dim=1) if self.mean_pool else output.pooler_output
             result.extend(features.float().cpu().numpy())
         return normalized(result)
 

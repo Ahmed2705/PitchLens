@@ -41,9 +41,29 @@ The full 928-frame EGYPT CUDA replay used the unchanged production detector and 
 
 All 106 project tests passed, including 11 camera-cut tests and a runner-level check of the coordinated resets. GPT-6.2 Sol reviews prompted fixes for sparse and fractional pans, cut sensitivity, broadcast graphics, and misleading overlap on repetitive pitch detail. The final read-only follow-up on `a226d34` independently passed four targeted tests and cleared the two remaining blocking findings. The model and verdict are recorded in `outputs/camera-cut-v1-sol-remediation.log` (session `01a21933-76a2-7002-aed1-d55f28a11372`).
 
-## Team classification (experimental)
+## Automatic team classification
 
-The video runner includes segment-local team assignments. `--team-config` optionally points to a JSON object overriding the defaults in `configs/team_classification.json`. Each JSONL track has `team` 1, 2, or null (unknown). Team numbers are arbitrary and may change across cuts or videos. Boxes are blue for team 1, magenta for team 2, and grey for unknown players and goalkeepers. Referees and balls have null team values. The model weights and tracker are unchanged.
+The video runner defaults to `--team-mode siglip`. It samples up to 16 evenly spaced source frames within the analysis range, using the configured people detector on a separate capture. Per frame it retains up to 12 high-confidence outfield jersey crops after size, shape and overlap checks. Goalkeepers and referees are excluded. It mean-pools SigLIP vision tokens in batches of eight, fits three-dimensional UMAP with a fixed seed, and fits K-means with two clusters. Cluster means in normalized SigLIP space provide cosine-similarity and margin checks for subsequent track observations. This follows the SigLIP, UMAP and K-means fitting sequence from the [Roboflow Sports reference](https://github.com/roboflow/sports/blob/main/sports/common/team.py).
+
+The two cluster identities are fixed for the analyzed clip, including across camera cuts. Uncertain observed players can supply new crops at least 12 frames apart. Two agreeing observations must pass the confidence and margin checks before the team is cached for that track. Camera cuts clear track evidence and retain the same clip-wide identities. In JSONL, Team A is `team: 1`, Team B is `team: 2`, and unknown is `team: null`. The default video displays Team A in blue, Team B in magenta and unknown players in grey. Goalkeepers, referees and balls remain unknown. Team identities are arbitrary across clips.
+
+The model is [`google/siglip-base-patch16-224`](https://huggingface.co/google/siglip-base-patch16-224), revision `7fd15f0689c79d79e38b1c2e2e2370a7bf2761ed`, Apache-2.0. The verified Safetensors checkpoint is 812,672,320 bytes with SHA-256 `2c63cb7d1f2e95ba501893cbb8faeb4ea9a3af295498d35097126228659c2af8`. The local copy and its two configuration files are in `E:\PitchLensStorage\models\pretrained\siglip-base-patch16-224`. [Official weight metadata](https://huggingface.co/google/siglip-base-patch16-224/blob/7fd15f0689c79d79e38b1c2e2e2370a7bf2761ed/model.safetensors)
+
+The existing environment already had PyTorch 2.11.0, Transformers 5.24.1, UMAP 0.6.0, scikit-learn 1.9.1 and Pillow 13.0.0. The `teams` packaging extra records the added direct dependencies. SigLIP uses the selected detector device, and UMAP and K-means run on the CPU. The tracking command above selects automatic SigLIP. `--siglip-snapshot` overrides the local directory. `--storage-root` changes the root for the standard model location. Missing weights or insufficient crops stop automatic initialization with an error.
+
+Similar kits, lighting changes, partial bodies, detector class errors and ID switches can lead to wrong or unknown assignments. The clip must show both teams clearly enough for fitting. Fixed track assignments can preserve an error until a new track is created. This mode does not infer club names.
+
+### Integration verification
+
+All 208 automated tests passed. The `passes2.mp4` CUDA smoke test fitted 166 crops in clusters of 102 and 64. The output MP4 decoded to all 762 frames, both team colors were visible, and the JSONL preserved the existing track schema. Player and ball tracking fields matched the BoT-SORT integration run frame by frame with `team` omitted. The ball was observed on 609 frames (79.92%). A separate CPU check produced a finite 768-dimensional SigLIP embedding.
+
+Manual review covered 18 outfield crops, six spaced across the tracked players from left to right at each of frames 45, 355 and 645. Team A corresponded to the black-and-white kit and Team B to the red kit on this clip. The review found 16 correct assignments, zero incorrect and two unknown. The sample includes repeated players and provides a limited visual check.
+
+The frame loop averaged 8.18 FPS on the RTX 2060 SUPER. Team model loading and clip fitting took 20.98 seconds before the loop. Online team assignment took 2.13 seconds across all frames. PyTorch peaked at 643.48 MiB allocated and 704 MiB reserved. The annotated MP4, JSONL, run summary, verification JSON and manual-review crops and results are in `E:\PitchLensStorage\outputs\team-classification-integration-v1`.
+
+### Color fallback
+
+Use `--team-mode color` for the existing segment-local LAB classifier. `--team-config` also selects color mode unless an explicit team mode is given, and overrides the defaults in `configs/team_classification.json`. Color team numbers may change across camera cuts or videos.
 
 The classifier samples the central torso, removes pixels resembling surrounding green pitch and likely skin, and clusters per-track smoothed LAB medians using two-means. It retains accepted centroids, expires inactive track colors, and attempts a matched refit when a cluster loses support and unassigned tracks accumulate. Very dark crops are ignored; recent track colors can bridge brief shadows. Insufficient crops, insufficient separation, and ambiguous or distant colors remain unknown. Goalkeepers always remain unknown; their team assignment was deferred until Feature #04, which is now authorized. API users must reset the classifier between videos; camera-cut segments reset it automatically.
 

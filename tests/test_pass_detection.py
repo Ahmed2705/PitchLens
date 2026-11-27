@@ -277,7 +277,8 @@ class PassDetectionTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / 'transfers.mp4'
-            args = ['track_video.py', '--input', 'fixture.mp4', '--output', str(output), '--weights', 'fixture.pt']
+            args = ['track_video.py', '--input', 'fixture.mp4', '--output', str(output), '--weights', 'fixture.pt',
+                    '--team-mode', 'color']
             with (patch.object(sys, 'argv', args), patch.object(cv2, 'VideoCapture', return_value=capture),
                   patch.object(cv2, 'VideoWriter', return_value=Mock()),
                   patch.object(track_video, 'Detector', return_value=detector),

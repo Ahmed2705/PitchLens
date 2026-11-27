@@ -187,7 +187,7 @@ class CameraCutTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "comparison.mp4"
             arguments = ["track_video.py", "--input", "synthetic.mp4", "--output", str(output),
-                         "--weights", "fixture.pt", "--pitch-weights", "pitch-fixture.pt"]
+                         "--weights", "fixture.pt", "--pitch-weights", "pitch-fixture.pt", "--team-mode", "color"]
             with (patch.object(sys, "argv", arguments),
                   patch.object(track_video, "Detector", return_value=detector),
                   patch.object(cv2, "VideoCapture", return_value=capture),

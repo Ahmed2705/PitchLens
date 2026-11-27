@@ -2,6 +2,11 @@
 
 PitchLens has an approved dual-model detection default and a verified local tracking integration. Ground-truth tracking evaluation remains outstanding.
 
+## Automatic team classification upgrade
+
+- Automatic team classification now fits SigLIP embeddings with UMAP and two-cluster K-means. Track assignments use fixed clip-wide Team A and Team B identities and allow unknowns. The LAB classifier remains available through `--team-mode color`. [Model and usage](TRACKING.md#automatic-team-classification)
+- All 208 tests passed. The CUDA smoke test exported all 762 `passes2.mp4` frames at 8.18 processing FPS after 20.98 seconds of team setup. Player and ball tracking fields matched the prior verified output. Manual review of 18 outfield crops found 16 correct, zero incorrect and two unknown. [Smoke-test results and limitations](TRACKING.md#integration-verification)
+
 ## BoT-SORT people tracking integration
 
 - BoT-SORT is the default people tracker, with sparse optical-flow camera compensation and ReID disabled. ByteTrack remains selectable with `--people-tracker bytetrack`. Existing tracking thresholds, the ball tracker, and camera-cut resets are preserved.

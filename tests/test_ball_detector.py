@@ -169,7 +169,7 @@ class BallTrackingRunnerTests(unittest.TestCase):
             with self.subTest(enable_ball=enable_ball), tempfile.TemporaryDirectory() as tmp:
                 output = Path(tmp) / 'sample.mp4'
                 args = ['track_video.py', '--input', 'input.mp4', '--output', str(output),
-                        '--weights', 'general.pt', '--device', 'cpu']
+                        '--weights', 'general.pt', '--device', 'cpu', '--team-mode', 'color']
                 if enable_ball:
                     args += ['--ball-weights', 'ball.pt']
                 else:
@@ -191,6 +191,7 @@ class BallTrackingRunnerTests(unittest.TestCase):
                 records = [json.loads(line) for line in output.with_suffix('.jsonl').read_text().splitlines()]
                 summary = json.loads(output.with_suffix('.json').read_text())
                 self.assertEqual(summary['detection']['profile'], 'legacy')
+                self.assertEqual(summary['team_classifier']['backend'], 'color')
                 self.assertEqual(general.call_args.kwargs['candidate_confidence'], .1)
                 self.assertEqual(summary['people_tracking'], {
                     'backend': 'BOTSORT' if enable_ball else 'BYTETracker',

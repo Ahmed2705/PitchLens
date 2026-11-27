@@ -10,7 +10,9 @@ import time
 import cv2
 import numpy as np
 import torch
-from pitchlens.ball_detector import BallDetector, add_detection_arguments, combine_detections, video_detection_settings
+from pitchlens.ball_detector import (
+    DETECTION_CONFIG, BallDetector, add_detection_arguments, combine_detections, video_detection_settings,
+)
 from pitchlens.detector import BALL_CLASS_ID, CLASS_NAMES, Detector
 from pitchlens.pass_detection import PassConfig, PassDetector
 from pitchlens.possession import PossessionAnalytics, PossessionConfig
@@ -58,7 +60,9 @@ def main():
     add_detection_arguments(p)
     p.add_argument('--config', type=Path, default=Path('configs/tracking.json'))
     p.add_argument('--people-tracker', choices=PEOPLE_TRACKERS, help='Override the configured people tracker')
-    p.add_argument('--team-config', type=Path, default=None)
+    p.add_argument('--team-mode', choices=('siglip', 'color', 'assisted'),
+                   help='Team classifier (default: automatic SigLIP)')
+    p.add_argument('--team-config', type=Path, help='JSON overrides for the color classifier')
     p.add_argument('--team-references', type=Path, help='JSON mapping team 1 and 2 to paths of labeled crop images')
     p.add_argument('--siglip-snapshot', type=Path, help='Local pretrained SigLIP snapshot directory')
     p.add_argument('--pitch-weights', type=Path, help='Verified local Roboflow v9 pitch checkpoint for evaluation')
@@ -70,12 +74,17 @@ def main():
     p.add_argument('--pass-config', type=Path, help='JSON overrides for ball transfer detection')
     p.add_argument('--max-frames', type=int, default=None, help='Optional limit for a short smoke check')
     args = p.parse_args()
-    if (args.team_references is None) != (args.siglip_snapshot is None):
-        p.error('--team-references and --siglip-snapshot must be supplied together')
+    team_mode = args.team_mode or ('assisted' if args.team_references else 'color' if args.team_config else 'siglip')
+    if team_mode == 'assisted' and (args.team_references is None or args.siglip_snapshot is None):
+        p.error('Assisted mode requires --team-references and --siglip-snapshot')
+    if args.team_references and team_mode != 'assisted':
+        p.error('--team-references requires assisted mode')
+    if args.siglip_snapshot and team_mode == 'color':
+        p.error('--siglip-snapshot requires siglip or assisted mode')
     if args.max_frames is not None and args.max_frames < 1:
         p.error('--max-frames must be positive')
-    if args.team_references and args.team_config:
-        p.error('--team-config applies only to automatic mode')
+    if args.team_config and team_mode != 'color':
+        p.error('--team-config applies only to color mode')
     if args.pitch_config and not args.pitch_weights:
         p.error('--pitch-config requires --pitch-weights')
     if args.pitch_temporal and not args.pitch_weights:
@@ -129,7 +138,9 @@ def main():
         if not isinstance(pass_overrides, dict):
             raise ValueError('Pass configuration must be a JSON object')
         passes = PassDetector(fps, tuple(team_colors), PassConfig(**pass_overrides))
-        if args.team_references:
+        team_setup_started = time.perf_counter()
+        snapshot = args.siglip_snapshot
+        if team_mode == 'assisted':
             from pitchlens.assisted_team import AssistedTeamClassifier, SiglipEncoder
             reference_paths = json.loads(args.team_references.read_text(encoding='utf-8-sig'))
             if not isinstance(reference_paths, dict) or set(reference_paths) != {'1', '2'} or any(not isinstance(reference_paths[k], list) or not reference_paths[k] for k in ('1', '2')):
@@ -146,14 +157,23 @@ def main():
                     if img is None or not img.size:
                         raise ValueError(f'Cannot read reference crop: {name}')
                     references[int(key)].append(img)
-            teams = AssistedTeamClassifier(SiglipEncoder(args.siglip_snapshot, detector.device), references)
-        else:
+            teams = AssistedTeamClassifier(SiglipEncoder(snapshot, detector.device), references)
+        elif team_mode == 'color':
             team_path = Path(__file__).resolve().parent.parent / 'configs' / 'team_classification.json'
             settings = json.loads(team_path.read_text(encoding='utf-8-sig'))
             if args.team_config:
                 settings.update(json.loads(args.team_config.read_text(encoding='utf-8-sig')))
             team_config = TeamConfig(**settings)
             teams = TeamClassifier(team_config)
+        else:
+            from pitchlens.automatic_team import prepare_automatic_teams
+
+            if snapshot is None:
+                storage = args.storage_root or Path(json.loads(DETECTION_CONFIG.read_text(encoding='utf-8-sig'))['storage_root'])
+                snapshot = storage / 'models' / 'pretrained' / 'siglip-base-patch16-224'
+            snapshot = snapshot.expanduser().resolve()
+            teams = prepare_automatic_teams(args.input, detector, snapshot, args.max_frames)
+        team_setup_elapsed = time.perf_counter() - team_setup_started
         if args.pitch_weights:
             from pitchlens.calibration import PitchCalibrator, PitchConfig
             from pitchlens.movement import MovementAnalytics, MovementConfig
@@ -184,6 +204,7 @@ def main():
         frames = cuts = observed = predicted = 0
         possession_elapsed = 0.
         pass_elapsed = 0.
+        team_elapsed = 0.
         ball_elapsed = 0.
         detection_counts = Counter(dict.fromkeys(CLASS_NAMES, 0))
         recovery_candidates = 0
@@ -209,7 +230,9 @@ def main():
                     else:
                         detection_counts[CLASS_NAMES[item.class_id]] += 1
                 tracked = tracker.update(frame, detections)
+                team_start = time.perf_counter()
                 assignments = teams.update(frame, tracked)
+                team_elapsed += time.perf_counter() - team_start
                 record = asdict(tracked)
                 if ball_detections is not None:
                     record['raw_ball_detections'] = [asdict(detection) for detection in ball_detections]
@@ -263,7 +286,8 @@ def main():
                         color = team_colors.get(team, (180, 180, 180))
                     label = f'{CLASS_NAMES[item.class_id]} {item.track_id}' if item.class_id != 3 else ('ball observed' if item.observed else 'ball predicted')
                     if item.class_id in (0, 1):
-                        label += f' team {team}' if team else ' unknown'
+                        team_name = {1: 'A', 2: 'B'}.get(team) if team_mode == 'siglip' else team
+                        label += f' team {team_name}' if team_name else ' unknown'
                         speed = output_track.get('movement', {}).get('speed_kmh')
                         if speed is not None:
                             label += f' {speed:.1f} km/h'
@@ -290,7 +314,11 @@ def main():
         summary = {'input': str(args.input), 'frames': frames, 'source_fps': fps, 'width': width, 'height': height,
                    'elapsed_seconds': elapsed, 'processing_fps': frames / elapsed, 'camera_cuts': cuts,
                    'ball_observed_frames': observed, 'ball_predicted_frames': predicted, 'device': detector.device,
-                   'image_size': detector.image_size, 'config': asdict(config), 'team_config': asdict(teams.config), 'team_mode': 'assisted' if args.team_references else 'automatic', 'team_references': str(args.team_references) if args.team_references else None, 'siglip_snapshot': str(args.siglip_snapshot) if args.siglip_snapshot else None}
+                   'image_size': detector.image_size, 'config': asdict(config), 'team_config': asdict(teams.config), 'team_mode': 'assisted' if team_mode == 'assisted' else 'automatic', 'team_references': str(args.team_references) if args.team_references else None, 'siglip_snapshot': str(snapshot) if snapshot else None}
+        summary['team_classifier'] = {'backend': team_mode, 'setup_seconds': team_setup_elapsed,
+                                      'assignment_seconds': team_elapsed}
+        if team_mode == 'siglip':
+            summary['team_classifier'].update(sample_count=teams.sample_count, cluster_sizes=teams.cluster_sizes)
         summary['possession'] = {
             'config': asdict(possession.config), 'analysis_ms_per_frame': 1000 * possession_elapsed / frames,
             **possession.summary(),
