@@ -69,9 +69,23 @@ class DetectorTests(unittest.TestCase):
                 detector.detect(frame)
 
     def test_wrong_model_classes_are_rejected(self):
-        self.backend.names = {0: "person"}
-        with self.assertRaises(ValueError):
+        self.backend.names = {0: "player", 1: "goalkeeper", 2: "referee"}
+        Detector(self.weights, people_only=True)
+        with self.assertRaisesRegex(ValueError, 'class IDs'):
             Detector(self.weights)
+        self.backend.names = {0: "player", 1: "referee", 2: "goalkeeper"}
+        with self.assertRaisesRegex(ValueError, 'class IDs'):
+            Detector(self.weights, people_only=True)
+
+    def test_checkpoint_and_inference_error_include_local_path(self):
+        self.model_factory.side_effect = OSError('invalid archive')
+        with self.assertRaisesRegex(RuntimeError, r'initialize.*weights\.pt.*invalid archive'):
+            Detector(self.weights, device='cpu')
+        self.model_factory.side_effect = None
+        self.backend.predict.side_effect = RuntimeError('backend failed')
+        detector = Detector(self.weights, device='cpu')
+        with self.assertRaisesRegex(RuntimeError, r'Inference failed.*weights\.pt on cpu.*backend failed'):
+            detector.detect(np.zeros((60, 100, 3), dtype=np.uint8))
 
     @patch("pitchlens.detector.torch.cuda.is_available", return_value=False)
     def test_class_specific_confidence_keeps_ball_and_filters_player(self, _cuda):

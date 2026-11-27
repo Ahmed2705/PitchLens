@@ -1,12 +1,11 @@
 # Player and ball tracking
 
-The tracking pipeline uses the existing YOLO26s checkpoint at 960 pixels. It calls the detector with a 0.10 person threshold so ByteTrack can associate lower-confidence detections; the ball retains the accepted 0.25 threshold. This differs from the detection evaluation's 0.25 global operating point. No model was retrained. `lap` supplies the assignment solver required by the pinned Ultralytics ByteTrack implementation.
+The tracking pipeline uses [Candidate V2 and SoccerNet-v3D](DETECTION.md#default-video-detection). Candidate V2 runs at 640 pixels with a detection operating point of 0.25 and supplies candidates down to 0.10 for ByteTrack recovery. SoccerNet-v3D runs at 960 pixels with a detection cutoff of 0.15. The ball tracker keeps its 0.25 admission threshold. `lap` supplies the assignment solver required by the pinned Ultralytics ByteTrack implementation.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\track_video.py `
   --input 'E:\PitchLensStorage\footage\your-video.mp4' `
   --output 'E:\PitchLensStorage\outputs\new-tracking.mp4' `
-  --weights runs\detection-baseline-640-v2\weights\best.pt `
   --config configs\tracking.json --device auto
 ```
 

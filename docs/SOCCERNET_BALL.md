@@ -1,6 +1,6 @@
 # SoccerNet-v3D ball detector integration
 
-The dedicated model is available for local evaluation through `--ball-weights`. The single-model YOLO26s runner remains the production default pending human review.
+SoccerNet-v3D is the default ball detector alongside Candidate V2. See the [default video detection guide](DETECTION.md#default-video-detection) for model selection and overrides. The verification below covers the earlier evaluation with the original YOLO26s people detector.
 
 ## Checkpoint and provenance
 
@@ -16,15 +16,15 @@ The dedicated model is available for local evaluation through `--ball-weights`. 
 
 GitHub did not publish a digest for this asset. The repository links to the selected asset, and the official release API matched the tag, name, URL and byte count. The SHA-256 above was computed locally after download. [Repository](https://github.com/mguti97/SoccerNet-v3D#weights) · [Official release](https://github.com/mguti97/SoccerNet-v3D/releases/tag/v1.0.0) · [Release metadata](https://api.github.com/repos/mguti97/SoccerNet-v3D/releases/tags/v1.0.0) · [Checkpoint download](https://github.com/mguti97/SoccerNet-v3D/releases/download/v1.0.0/yolo-sn-ball-opt.pt)
 
-This is an externally pretrained model by Marc Gutiérrez-Pérez and Antonio Agudo, whose SoccerNet-v3D paper appeared at the 2025 CVPR Workshops. The authors trained the detector on SoccerNet-v3 and fine-tuned it with optimized SoccerNet-v3D ball boxes. PitchLens supplied no training or fine-tuning data for this model. The original PitchLens-trained YOLO26s remains responsible for players, goalkeepers and referees. [Authors’ training provenance and citation](https://github.com/mguti97/SoccerNet-v3D#weights)
+This is an externally pretrained model by Marc Gutiérrez-Pérez and Antonio Agudo, whose SoccerNet-v3D paper appeared at the 2025 CVPR Workshops. The authors trained the detector on SoccerNet-v3 and fine-tuned it with optimized SoccerNet-v3D ball boxes. PitchLens supplied no training or fine-tuning data for this model. [Authors’ training provenance and citation](https://github.com/mguti97/SoccerNet-v3D#weights)
 
 The repository’s tagged license is GPL-2.0. The checkpoint embeds an Ultralytics AGPL-3.0 notice and records Ultralytics 8.3.64 as its training version. The release supplies no separate explanation reconciling those notices for the checkpoint. SoccerNet also gates some protected video datasets under an NDA. Checkpoint redistribution or commercial use remains unresolved and outside this local evaluation. [Tagged repository license](https://github.com/mguti97/SoccerNet-v3D/blob/v1.0.0/LICENSE) · [Ultralytics licensing](https://www.ultralytics.com/license) · [SoccerNet data access](https://www.soccer-net.org/data)
 
 ## Running and configuring the detector
 
-With `--ball-weights`, PitchLens runs both models on each original BGR frame, keeps the YOLO26s person detections, discards its ball boxes, and supplies the dedicated ball boxes to the existing tracker. Invalid or incompatible dedicated checkpoints fail before output creation. Omitting `--ball-weights` selects the original single-model runner.
+PitchLens runs both models on each original BGR frame, keeping the YOLO26s person detections and supplying only SoccerNet-v3D ball boxes to the tracker. Invalid or incompatible dedicated checkpoints fail before output creation. `--ball-weights` overrides the dedicated checkpoint or enables it with the legacy profile.
 
-The general detector runs at 960 pixels. The dedicated model defaults to 960 pixels and a confidence cutoff of 0.15. To override dedicated inference, pass `--ball-config` with a JSON object such as `{"image_size": 1280, "confidence": 0.15}`. Image size must be a positive multiple of 32 and confidence must be in [0, 1]. Both models use the selected `--device`. The production tracker still requires a ball confidence of 0.25, so candidates from 0.15 to below 0.25 can appear in raw diagnostics only under the evaluation settings.
+The default people detector runs at 640 pixels. The dedicated model defaults to 960 pixels and a confidence cutoff of 0.15. To override dedicated inference, pass `--ball-config` with a JSON object such as `{"image_size": 1280, "confidence": 0.15}`. Image size must be a positive multiple of 32 and confidence must be in [0, 1]. Both models use the selected `--device`. The tracker still requires a ball confidence of 0.25, so candidates from 0.15 to below 0.25 appear only in raw diagnostics under the default tracking settings.
 
 Ultralytics reports `xyxy` in original image pixels, and the detector clips them to the original frame boundaries. On a 1920 × 1080 FCB frame 150, the dedicated model returned approximately `(907.01, 610.46, 920.90, 624.46)` at confidence 0.16585, matching the visible ball in the review image. Scores are the model’s original [0, 1] confidence values. Dual-mode JSONL adds `raw_ball_detections` with post-NMS candidates at the dedicated inference threshold. The tracker can select an observed ball, carry a prediction with null confidence, or report no ball. The possession and pass logic continues to consume the tracked provenance.
 

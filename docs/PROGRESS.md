@@ -1,6 +1,12 @@
 # Development progress
 
-PitchLens has an accepted object detection baseline and a tracking implementation tested on two unlabelled videos. Ground-truth tracking evaluation remains outstanding.
+PitchLens has an approved dual-model detection default and a verified local tracking integration. Ground-truth tracking evaluation remains outstanding.
+
+## Final detection pipeline integration
+
+- Candidate V2 is the default people detector at 640 pixels and 0.25 output confidence. SoccerNet-v3D is the default ball detector at 960 pixels and 0.15 confidence. Both local checkpoint hashes matched the recorded values. ByteTrack retains the 0.10 candidate floor, and ball tracker admission remains 0.25. The legacy and GSR profiles remain available. [Configuration, paths and hashes](DETECTION.md#default-video-detection)
+- All 200 automated tests passed. On `passes2.mp4`, the default run processed all 762 frames at 10.25 processing FPS with PyTorch peaks of 282.84 MiB allocated and 316 MiB reserved. The annotated MP4 decoded fully and all four class IDs appeared in tracking output. All 609 observed ball tracks matched dedicated ball detections, and 335 tracked people records used sub-0.25 detections. [Smoke-test evidence](DETECTION.md#integration-verification)
+- Candidate V2 was selected for its player results on Crystal Palace–Arsenal and IFAP. Goalkeeper and referee recall on IFAP remain 18.8% and 28.8%, respectively, at confidence 0.25. The integration check verifies downstream compatibility on this clip. Analytics accuracy remains outside the evidence.
 
 ## Foundation Reliability dataset audit
 
@@ -39,8 +45,8 @@ PitchLens has an accepted object detection baseline and a tracking implementatio
 
 ## SoccerNet-v3D dedicated ball detector
 
-- Added optional dual-model CUDA inference to the tracking runner. SoccerNet-v3D YOLO11l supplies ball boxes, while the PitchLens YOLO26s supplies players, goalkeepers and referees. The single-model runner remains the production default. The official checkpoint loaded using Ultralytics safe loading, and all 186 automated tests passed.
-- The earlier four-clip evaluation showed mixed ball coverage and zero transfers. On four new paired short passing clips, SoccerNet improved observed ball coverage and continuity in every clip. Pooled coverage rose from 40.7% to 83.7%. SoccerNet reached 76.2% observed coverage on the long validation clip. The developer's video review also found better ball tracking. SoccerNet is recommended as the production ball detector pending final developer approval. The runner still defaults to YOLO26s alone. [Passing-clip evaluation](SOCCERNET_BALL.md#passing-clip-evaluation)
+- The original evaluation added opt-in dual-model CUDA inference using SoccerNet-v3D YOLO11l for the ball and the original PitchLens YOLO26s for people. The official checkpoint loaded using Ultralytics safe loading, and all 186 automated tests passed at that stage.
+- The earlier four-clip evaluation showed mixed ball coverage and zero transfers. On four new paired short passing clips, SoccerNet improved observed ball coverage and continuity in every clip. Pooled coverage rose from 40.7% to 83.7%. SoccerNet reached 76.2% observed coverage on the long validation clip. The developer's video review also found better ball tracking. [Passing-clip evaluation](SOCCERNET_BALL.md#passing-clip-evaluation)
 
 ## Initial video check
 

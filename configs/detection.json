@@ -1,0 +1,21 @@
+{
+  "storage_root": "E:/PitchLensStorage",
+  "ball_weights": "models/pretrained/yolo-sn-ball-opt.pt",
+  "profiles": {
+    "final": {
+      "people_weights": "runs/detection-candidate-v2-640/weights/best.pt",
+      "image_size": 640,
+      "confidence": 0.25
+    },
+    "legacy": {
+      "people_weights": "runs/detection-baseline-640-v2/weights/best.pt",
+      "image_size": 960,
+      "confidence": 0.25
+    },
+    "gsr": {
+      "people_weights": "runs/gsr-yolo26s-640-v1/weights/best.pt",
+      "image_size": 640,
+      "confidence": 0.25
+    }
+  }
+}

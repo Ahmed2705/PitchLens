@@ -1,5 +1,6 @@
 """Ball checkpoint and tracking-runner contracts without pretrained weights."""
 
+import argparse
 from contextlib import redirect_stdout
 from io import StringIO
 import json
@@ -13,8 +14,11 @@ import cv2
 import numpy as np
 import torch
 
-from pitchlens.ball_detector import BallDetector, BallDetectorConfig, combine_detections
-from pitchlens.detector import Detection
+from pitchlens.ball_detector import (
+    BallDetector, BallDetectorConfig, add_detection_arguments, combine_detections, video_detection_settings,
+)
+from pitchlens.detector import CLASS_NAMES, Detection, Detector
+from pitchlens.tracking import Tracker
 from scripts import track_video
 
 
@@ -77,6 +81,81 @@ class BallDetectorTests(unittest.TestCase):
 
 
 class BallTrackingRunnerTests(unittest.TestCase):
+    def test_profiles_and_independent_overrides(self):
+        parser = argparse.ArgumentParser()
+        add_detection_arguments(parser)
+        defaults = video_detection_settings(parser.parse_args([]))
+        self.assertEqual(defaults.profile, 'final')
+        self.assertTrue(defaults.people_weights.as_posix().endswith('/detection-candidate-v2-640/weights/best.pt'))
+        self.assertEqual((defaults.people_image_size, defaults.people_confidence), (640, .25))
+        self.assertEqual(defaults.ball_weights.name, 'yolo-sn-ball-opt.pt')
+        self.assertEqual((defaults.ball_config.image_size, defaults.ball_config.confidence), (960, .15))
+        legacy = video_detection_settings(parser.parse_args(['--weights', 'original.pt']))
+        self.assertEqual((legacy.profile, legacy.people_image_size, legacy.ball_weights), ('legacy', 960, None))
+        self.assertEqual(legacy.people_weights, Path('original.pt').resolve())
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            config = root / 'ball.json'
+            config.write_text('{"image_size": 1280, "confidence": 0.20}', encoding='utf-8')
+            custom = video_detection_settings(parser.parse_args([
+                '--detector-profile', 'gsr', '--storage-root', str(root), '--people-image-size', '704',
+                '--people-confidence', '.3', '--ball-config', str(config),
+            ]))
+            self.assertEqual(custom.people_weights, root / 'runs/gsr-yolo26s-640-v1/weights/best.pt')
+            self.assertEqual(custom.ball_weights, root / 'models/pretrained/yolo-sn-ball-opt.pt')
+            self.assertEqual((custom.people_image_size, custom.people_confidence), (704, .3))
+            self.assertEqual((custom.ball_config.image_size, custom.ball_config.confidence), (1280, .2))
+            config.write_text('[]', encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'Invalid dedicated ball configuration'):
+                video_detection_settings(parser.parse_args(['--ball-config', str(config)]))
+        with self.assertRaisesRegex(ValueError, 'Invalid people detector settings'):
+            video_detection_settings(parser.parse_args(['--people-image-size', '641']))
+
+    def test_dual_inference_feeds_bytetrack_recovery_and_only_dedicated_ball(self):
+        class Boxes:
+            def __init__(self, classes, scores):
+                self.cls = torch.tensor(classes)
+                self.conf = torch.tensor(scores)
+                self.xyxy = torch.tensor([[10. + 20*i, 10., 20. + 20*i, 30.] for i in range(len(classes))])
+
+            def __len__(self):
+                return len(self.cls)
+
+        frame = np.zeros((80, 100, 3), dtype=np.uint8)
+        people = Mock(task='detect', names=dict(enumerate(CLASS_NAMES)))
+        people.predict.side_effect = [
+            [SimpleNamespace(boxes=Boxes([0, 1, 2, 3], [.9, .8, .7, .99]))],
+            [SimpleNamespace(boxes=Boxes([0], [.19]))],
+            [],
+        ]
+        ball = Mock(task='detect', names={0: 'ball'})
+        ball.predict.side_effect = [[SimpleNamespace(boxes=Boxes([0], [.8]))],
+                                    [SimpleNamespace(boxes=Boxes([0], [.2]))], []]
+        with tempfile.TemporaryDirectory() as tmp, patch('pitchlens.detector.YOLO', side_effect=[people, ball]) as loader:
+            path = Path(tmp) / 'local.pt'
+            path.touch()
+            person_detector = Detector(path, image_size=640, confidence=.25, candidate_confidence=.1,
+                                       people_only=True, device='cpu')
+            ball_detector = BallDetector(path, BallDetectorConfig(), device='cpu')
+            tracker = Tracker(30.)
+            first, second, empty = [combine_detections(person_detector.detect(frame), ball_detector.detect(frame))
+                                    for _ in range(3)]
+            self.assertEqual(loader.call_count, 2)
+        self.assertEqual([item.class_id for item in first], [0, 1, 2, 3])
+        self.assertEqual(first[-1].xyxy, (10., 10., 20., 30.))
+        self.assertEqual([item.class_id for item in second], [0, 3])
+        self.assertEqual(empty, [])
+        first_tracks = tracker.update(frame, first).tracks
+        second_tracks = tracker.update(frame, second).tracks
+        self.assertEqual([item.class_id for item in first_tracks], [0, 1, 2, 3])
+        self.assertEqual([item.class_id for item in second_tracks], [0, 3])
+        self.assertEqual(first_tracks[0].track_id, second_tracks[0].track_id)
+        self.assertLess(second_tracks[0].confidence, person_detector.confidence)
+        self.assertFalse(second_tracks[-1].observed)
+        people_args, ball_args = people.predict.call_args.kwargs, ball.predict.call_args.kwargs
+        self.assertEqual((people_args['imgsz'], people_args['conf'], people_args['classes']), (640, .1, [0, 1, 2]))
+        self.assertEqual((ball_args['imgsz'], ball_args['conf']), (960, .15))
+
     def test_runner_provenance_and_downstream_analytics(self):
         people = [Detection((x - 5., 30., x + 5., 70.), 0, .9) for x in (50., 150.)]
         general_ball = Detection((298., 68., 302., 72.), 3, .99)
@@ -109,6 +188,8 @@ class BallTrackingRunnerTests(unittest.TestCase):
                     track_video.main()
                 records = [json.loads(line) for line in output.with_suffix('.jsonl').read_text().splitlines()]
                 summary = json.loads(output.with_suffix('.json').read_text())
+                self.assertEqual(summary['detection']['profile'], 'legacy')
+                self.assertEqual(general.call_args.kwargs['candidate_confidence'], .1)
                 balls = [next((track for track in record['tracks'] if track['class_id'] == 3), None)
                          for record in records]
                 if enable_ball:

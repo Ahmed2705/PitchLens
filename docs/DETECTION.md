@@ -1,5 +1,44 @@
 # Object detection data
 
+## Default video detection
+
+`scripts/track_video.py` and `scripts/annotate_video.py` default to the `final` profile in [detection.json](../configs/detection.json). The runners load each local checkpoint once and send each frame to both models. The people detector uses the PitchLens class IDs `0` player, `1` goalkeeper and `2` referee. Its ball class is excluded in dual mode, and the dedicated detector maps its own class `0` to PitchLens class `3`.
+
+| Role | Verified checkpoint | Inference size | Detection confidence | Verified SHA-256 |
+| --- | --- | ---: | ---: | --- |
+| People | `runs/detection-candidate-v2-640/weights/best.pt` | 640 | 0.25 | `cd05e022e02e5d4f6f6192fea438e8ebf5644a0e8fa575295366af9dc1e658eb` |
+| Ball | `E:\PitchLensStorage\models\pretrained\yolo-sn-ball-opt.pt` | 960 | 0.15 | `a3082fb435a8501ae17cfe4ac78e66ca7041205e115feda344d34d1693064f36` |
+
+At 640, YOLO26s Candidate V2 had the best player results among the compared checkpoints on both external sets. Player AP50–95 rose from 7.8% to 41.7% on Crystal Palace–Arsenal and from 49.5% to 51.8% on IFAP against the original production checkpoint at 640. The approved SoccerNet-v3D model is supported by the prior [passing-clip evaluation](SOCCERNET_BALL.md#passing-clip-evaluation). The people comparison report, provenance and metrics are under `E:\PitchLensStorage\outputs\final-detector-comparison-v1`.
+
+At confidence 0.25 on IFAP, Candidate V2 matched 58 of 308 goalkeepers and 197 of 683 referees. Goalkeeper precision on Crystal Palace–Arsenal was 23.2% despite 98.0% recall. Role confusion and missed detections remain material limitations.
+
+From the project root, use a new output stem in an existing directory:
+
+```powershell
+$env:ULTRALYTICS_SAFE_LOAD = '1'
+.\.venv\Scripts\python.exe scripts/track_video.py `
+  --input 'E:\PitchLensStorage\footage\passes2.mp4' `
+  --output 'E:\PitchLensStorage\outputs\passes2-tracked.mp4' --device auto
+```
+
+- `--detector-profile legacy` selects the original four-class checkpoint at 960 pixels and single-model inference. Existing commands with `--weights` and no profile retain legacy behavior. Add `--ball-weights` to an explicit legacy run to reproduce the earlier dual-model setup.
+- `--detector-profile gsr` selects the preserved three-class GSR checkpoint at `runs/gsr-yolo26s-640-v1/weights/best.pt` under the external storage root and uses SoccerNet-v3D for the ball.
+- Use `--storage-root` to relocate external checkpoints, `--detector-profile final --weights` to override the people checkpoint in the default dual setup, or `--ball-weights` to override the dedicated checkpoint. Missing or incompatible local weights stop the run.
+- Use `--people-image-size` and `--people-confidence` for people settings. For ball settings, use `--ball-config` with a JSON object such as `{"image_size": 960, "confidence": 0.15}`. `--device auto` uses CUDA when available and otherwise uses CPU.
+
+The original checkpoint at `runs/detection-baseline-640-v2/weights/best.pt` matched SHA-256 `29135b3b60a241f006f88f042db57b7c60ad3c7f161454683338eea01cb4b94b`. The GSR checkpoint matched SHA-256 `d70da7d2234479b9247cb274b1b65519531bb0ce0bc3c5b712123f866279d2b2`.
+
+The annotation runner displays people detections at the operational confidence threshold. The tracking runner also passes people candidates down to the configured `person_low` (0.10 by default) to ByteTrack. Established tracks can use those candidates, so track confidence may be below 0.25. The tracker still admits ball candidates at 0.25 or higher, while raw dedicated ball diagnostics go down to 0.15. Tracking and downstream JSONL fields are unchanged, and the run summary records detector settings and candidate counts.
+
+### Integration verification
+
+All 200 automated tests passed with `python -B -m unittest discover -s tests` in the existing virtual environment. Coverage includes profile selection, separate inference settings, class mapping, empty and invalid inputs, legacy mode, ball deduplication, and ByteTrack recovery. Three-frame CPU checks also produced readable video for default annotation and for both `legacy` and `gsr` tracking.
+
+The default CUDA run processed all 762 frames of `passes2.mp4` without processing errors. The 1920 × 1080 MP4 decoded fully at 59.99 source FPS and the JSONL contained consecutive frame indices 0–761. The run emitted all four internal track classes. ByteTrack emitted 335 people track records below 0.25, and all 609 observed ball tracks matched a dedicated ball detection at or above 0.25. There were 115 predicted ball frames and 38 frames without a ball track. The track, team, possession and pass fields were readable in every record. This clip had no detected camera cuts. The automated suite covers cut-related state resets.
+
+Processing averaged 10.25 FPS over the frame loop, including decoding, tracking, overlays and writing, on the RTX 2060 SUPER. PyTorch peaked at 282.84 MiB allocated and 316 MiB reserved. The annotated video (`passes2-tracked.mp4`), JSONL, run summary and `verification.json` are under `E:\PitchLensStorage\outputs\final-detection-integration-v1`. These checks establish integration behavior on the clip. Tracking and analytics accuracy require ground truth.
+
 The object detection baseline has been evaluated on held-out broadcast frames, with the limitations below. The prepared dataset and weights are local artifacts and are not committed to Git. The configured raw and processed paths can be changed per machine.
 
 ## Sources and attribution
@@ -67,7 +106,7 @@ Ultralytics identifies its installed package license as AGPL-3.0. The PitchLens 
 
 ## Frame detector and evaluation
 
-The detector loads its weights once, selects CUDA when available and otherwise falls back to CPU. It accepts a nonempty OpenCV BGR `uint8` frame and returns `Detection` objects with `(left, top, right, bottom)` pixel coordinates in the original frame, class IDs, and confidence. The selected default is 960 pixels and 0.25 confidence. The global confidence threshold, optional per-class confidence thresholds, input resolution and device are configurable. The IoU setting is passed through for models that use non-maximum suppression; the standard end-to-end YOLO26s head is NMS-free, so that setting does not affect its predictions. Missing weights, incompatible class mappings and invalid frames are rejected.
+The low-level single-checkpoint `Detector` API loads weights once, selects CUDA when available and otherwise falls back to CPU. It accepts a nonempty OpenCV BGR `uint8` frame and returns `Detection` objects with `(left, top, right, bottom)` pixel coordinates in the original frame, class IDs, and confidence. Its constructor defaults to 960 pixels and 0.25 confidence. Confidence, per-class thresholds, input resolution and device are configurable. The IoU setting applies when the loaded model uses non-maximum suppression. Missing weights, incompatible class mappings and invalid frames are rejected.
 
 ```python
 import cv2
@@ -116,4 +155,4 @@ The final 25-image test at 960 pixels and 0.25 confidence produced macro precisi
 
 At this threshold the model missed eight balls and produced three false ball detections. Twenty-one referee boxes were classified as players. The frame benchmark measured 54.06 FPS, with 128,099,840 bytes peak allocated and 148,897,792 bytes peak reserved by PyTorch during inference. Several provisional aggregate targets and the goalkeeper AP50 target were not met. The very small, correlated single-stadium test set, particularly its five goalkeeper boxes, means these numbers should not be generalized to new broadcasts without further independent evaluation. See [PROGRESS.md](PROGRESS.md#initial-video-check) for the initial unlabelled video check.
 
-For a new local video, use `python scripts/annotate_video.py --input INPUT --output OUTPUT.mp4 --weights WEIGHTS`. Output must not already exist. The script writes a silent MP4, a contact sheet and a JSON summary beside it. It does not track objects or measure accuracy without ground truth.
+For a new local video, use `python scripts/annotate_video.py --input INPUT --output OUTPUT.mp4`. Use a fresh output stem. The script writes a silent MP4 with frame detections, a contact sheet and a JSON summary.
