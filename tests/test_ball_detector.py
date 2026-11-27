@@ -172,6 +172,8 @@ class BallTrackingRunnerTests(unittest.TestCase):
                         '--weights', 'general.pt', '--device', 'cpu']
                 if enable_ball:
                     args += ['--ball-weights', 'ball.pt']
+                else:
+                    args += ['--people-tracker', 'bytetrack']
                 with (patch('sys.argv', args), patch.object(track_video.cv2, 'VideoCapture') as capture,
                       patch.object(track_video.cv2, 'VideoWriter'), patch.object(track_video, 'Detector') as general,
                       patch.object(track_video, 'BallDetector') as ball,
@@ -190,6 +192,11 @@ class BallTrackingRunnerTests(unittest.TestCase):
                 summary = json.loads(output.with_suffix('.json').read_text())
                 self.assertEqual(summary['detection']['profile'], 'legacy')
                 self.assertEqual(general.call_args.kwargs['candidate_confidence'], .1)
+                self.assertEqual(summary['people_tracking'], {
+                    'backend': 'BOTSORT' if enable_ball else 'BYTETracker',
+                    'gmc_method': 'sparseOptFlow' if enable_ball else None,
+                    'with_reid': False,
+                })
                 balls = [next((track for track in record['tracks'] if track['class_id'] == 3), None)
                          for record in records]
                 if enable_ball:

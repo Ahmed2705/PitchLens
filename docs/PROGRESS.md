@@ -2,6 +2,11 @@
 
 PitchLens has an approved dual-model detection default and a verified local tracking integration. Ground-truth tracking evaluation remains outstanding.
 
+## BoT-SORT people tracking integration
+
+- BoT-SORT is the default people tracker, with sparse optical-flow camera compensation and ReID disabled. ByteTrack remains selectable with `--people-tracker bytetrack`. Existing tracking thresholds, the ball tracker, and camera-cut resets are preserved.
+- All 203 automated tests passed. The default `passes2.mp4` run processed and exported all 762 frames at 7.28 processing FPS. It emitted IDs for all person classes and observed the ball on 609 frames (79.92%). Ball output matched the prior integration on every frame. The smoke test verifies pipeline behavior. Identity switches remain possible and identity accuracy is unmeasured. [Configuration and smoke-test evidence](TRACKING.md#bot-sort-integration-verification)
+
 ## Final detection pipeline integration
 
 - Candidate V2 is the default people detector at 640 pixels and 0.25 output confidence. SoccerNet-v3D is the default ball detector at 960 pixels and 0.15 confidence. Both local checkpoint hashes matched the recorded values. ByteTrack retains the 0.10 candidate floor, and ball tracker admission remains 0.25. The legacy and GSR profiles remain available. [Configuration, paths and hashes](DETECTION.md#default-video-detection)

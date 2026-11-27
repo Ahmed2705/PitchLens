@@ -1,7 +1,7 @@
 """Run detector and tracker on a video, writing MP4 and JSONL without overwrite."""
 import argparse
 from collections import Counter
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import math
 from pathlib import Path
@@ -14,7 +14,7 @@ from pitchlens.ball_detector import BallDetector, add_detection_arguments, combi
 from pitchlens.detector import BALL_CLASS_ID, CLASS_NAMES, Detector
 from pitchlens.pass_detection import PassConfig, PassDetector
 from pitchlens.possession import PossessionAnalytics, PossessionConfig
-from pitchlens.tracking import Tracker, TrackingConfig
+from pitchlens.tracking import PEOPLE_TRACKERS, Tracker, TrackingConfig
 from pitchlens.team_classification import TeamClassifier, TeamConfig
 
 
@@ -57,6 +57,7 @@ def main():
     p.add_argument('--output', type=Path, required=True, help='New MP4 path; JSONL and summary use the same stem')
     add_detection_arguments(p)
     p.add_argument('--config', type=Path, default=Path('configs/tracking.json'))
+    p.add_argument('--people-tracker', choices=PEOPLE_TRACKERS, help='Override the configured people tracker')
     p.add_argument('--team-config', type=Path, default=None)
     p.add_argument('--team-references', type=Path, help='JSON mapping team 1 and 2 to paths of labeled crop images')
     p.add_argument('--siglip-snapshot', type=Path, help='Local pretrained SigLIP snapshot directory')
@@ -88,7 +89,12 @@ def main():
         raise FileExistsError('Output video or sidecar already exists')
     if not args.output.parent.is_dir():
         raise ValueError('Output directory must exist')
-    config = TrackingConfig(**json.loads(args.config.read_text(encoding='utf-8-sig')))
+    try:
+        config = TrackingConfig(**json.loads(args.config.read_text(encoding='utf-8-sig')))
+        if args.people_tracker is not None:
+            config = replace(config, people_tracker=args.people_tracker)
+    except (OSError, TypeError, ValueError) as exc:
+        p.error(f'Invalid tracking configuration ({args.config}): {exc}')
     try:
         detection = video_detection_settings(args)
     except ValueError as exc:
@@ -299,6 +305,12 @@ def main():
             'people_candidate_confidence': candidate_confidence,
             'operational_detection_counts': dict(detection_counts),
             'people_candidates_below_output_confidence': recovery_candidates,
+        }
+        people_tracker = tracker.people[0]
+        summary['people_tracking'] = {
+            'backend': type(people_tracker).__name__,
+            'gmc_method': getattr(people_tracker.args, 'gmc_method', None),
+            'with_reid': getattr(people_tracker.args, 'with_reid', False),
         }
         if ball_detector is not None:
             summary['dedicated_ball'] = {

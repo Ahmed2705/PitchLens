@@ -9,7 +9,10 @@ import numpy as np
 from pitchlens.camera_cut import is_hard_cut, thumbnail
 from pitchlens.detector import Detection  # Configure Ultralytics before importing its tracking modules.
 from ultralytics.engine.results import Boxes
+from ultralytics.trackers.bot_sort import BOTSORT
 from ultralytics.trackers.byte_tracker import BYTETracker
+
+PEOPLE_TRACKERS = ('botsort', 'bytetrack')
 
 
 @dataclass(frozen=True)
@@ -25,8 +28,11 @@ class TrackingConfig:
     cut_threshold: float = 0.32
     trajectory_seconds: float = 1.0
     cut_appearance_threshold: float = 0.055
+    people_tracker: str = 'botsort'
 
     def __post_init__(self):
+        if self.people_tracker not in PEOPLE_TRACKERS:
+            raise ValueError("people_tracker must be 'botsort' or 'bytetrack'")
         for name in ('person_low', 'person_high', 'person_new', 'person_match', 'ball_confidence',
                      'ball_gate_fraction', 'cut_threshold', 'cut_appearance_threshold'):
             value = getattr(self, name)
@@ -61,7 +67,7 @@ class FrameTracks:
 
 
 class Tracker:
-    """Separate ByteTrack instances per person class and a gated ball predictor.
+    """Separate tracker instances per person class and a gated ball predictor.
 
     Create a fresh instance per video, or call reset() before processing another.
     Consecutive frames must be supplied in order at the configured source FPS.
@@ -78,7 +84,14 @@ class Tracker:
         args = SimpleNamespace(track_high_thresh=c.person_high, track_low_thresh=c.person_low,
                                new_track_thresh=c.person_new, match_thresh=c.person_match,
                                track_buffer=max(1, round(c.person_buffer_seconds * self.fps)), fuse_score=False)
-        self.people = [BYTETracker(args) for _ in range(3)]
+        if c.people_tracker == 'botsort':
+            args.gmc_method = 'sparseOptFlow'
+            args.with_reid = False
+            args.proximity_thresh = 0.5
+            args.appearance_thresh = 0.8
+            self.people = [BOTSORT(args) for _ in range(3)]
+        else:
+            self.people = [BYTETracker(args) for _ in range(3)]
         self.ball = None
         self.velocity = np.zeros(2)
         self.gap = 0
@@ -113,10 +126,12 @@ class Tracker:
         self.previous = small
         self.shape = frame.shape
         result = []
+        # BoT-SORT needs unannotated source frames, including frames without boxes.
+        motion_frame = frame if self.config.people_tracker == 'botsort' else None
         for cls, tracker in enumerate(self.people):
             rows = [[*d.xyxy, d.confidence, cls] for d in detections if d.class_id == cls]
             boxes = Boxes(np.asarray(rows, dtype=np.float32).reshape(-1, 6), (h, w))
-            for row in tracker.update(boxes):
+            for row in tracker.update(boxes, img=motion_frame):
                 x1, y1, x2, y2 = row[:4]
                 xyxy = (max(0., min(float(x1), w)), max(0., min(float(y1), h)),
                         max(0., min(float(x2), w)), max(0., min(float(y2), h)))

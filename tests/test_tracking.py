@@ -1,8 +1,11 @@
 """Synthetic behavior tests; these do not measure real-world accuracy."""
 import unittest
+from unittest.mock import patch
 import numpy as np
 from pitchlens.detector import Detection
 from pitchlens.tracking import Tracker, TrackingConfig
+from ultralytics.trackers.bot_sort import BOTSORT
+from ultralytics.trackers.byte_tracker import BYTETracker
 
 
 def det(x, cls=0, score=.9):
@@ -13,6 +16,53 @@ class TrackingTests(unittest.TestCase):
     def setUp(self):
         self.frame = np.zeros((100, 200, 3), np.uint8)
         self.tracker = Tracker(10)
+
+    def test_default_botsort_uses_source_frames_without_reid(self):
+        self.assertEqual(self.tracker.config.people_tracker, 'botsort')
+        self.assertEqual(len(self.tracker.people), 3)
+        for person_tracker in self.tracker.people:
+            self.assertIsInstance(person_tracker, BOTSORT)
+            self.assertEqual(person_tracker.gmc.method, 'sparseOptFlow')
+            self.assertIsNone(person_tracker.encoder)
+            self.assertFalse(person_tracker.args.fuse_score)
+            self.assertEqual(person_tracker.args.track_buffer, 10)
+            self.assertEqual((person_tracker.args.track_low_thresh, person_tracker.args.track_high_thresh,
+                              person_tracker.args.new_track_thresh, person_tracker.args.match_thresh),
+                             (.10, .25, .25, .80))
+        gmc = self.tracker.people[0].gmc
+        with patch.object(gmc, 'apply', wraps=gmc.apply) as motion:
+            first = self.tracker.update(self.frame, [det(20)])
+            recovery = self.tracker.update(self.frame, [det(20, score=.101)])
+            empty = self.tracker.update(self.frame, [])
+        self.assertEqual(first.tracks[0].track_id, recovery.tracks[0].track_id)
+        self.assertAlmostEqual(recovery.tracks[0].confidence, .101)
+        self.assertEqual(empty.tracks, ())
+        self.assertEqual(motion.call_count, 3)
+        for call in motion.call_args_list:
+            self.assertIs(call.args[0], self.frame)
+        self.assertEqual(motion.call_args.args[1].shape, (0, 4))
+
+    def test_explicit_bytetrack_fallback_preserves_recovery(self):
+        fallback = Tracker(10, TrackingConfig(people_tracker='bytetrack'))
+        for person_tracker in fallback.people:
+            self.assertIs(type(person_tracker), BYTETracker)
+        first = fallback.update(self.frame, [det(20)])
+        second = fallback.update(self.frame, [det(21, score=.2)])
+        self.assertEqual(first.tracks[0].track_id, second.tracks[0].track_id)
+
+    def test_interleaved_video_instances_keep_separate_state(self):
+        other = Tracker(10)
+        first = self.tracker.update(self.frame, [det(20)])
+        other_frame = np.full_like(self.frame, 255)
+        other_first = other.update(other_frame, [det(100)])
+        self.assertEqual(first.tracks[0].track_id, 1)
+        self.assertEqual(other_first.tracks[0].track_id, 1)
+        self.assertIsNot(self.tracker.people[0].gmc, other.people[0].gmc)
+        other.reset()
+        continued = self.tracker.update(self.frame, [det(21, score=.2)])
+        self.assertEqual(continued.frame_index, 1)
+        self.assertEqual(continued.tracks[0].track_id, 1)
+        self.assertEqual(other.update(other_frame, []).frame_index, 0)
 
     def test_people_stable_low_confidence_and_occlusion(self):
         first = self.tracker.update(self.frame, [det(20)]).tracks[0].track_id
@@ -68,18 +118,27 @@ class TrackingTests(unittest.TestCase):
         self.assertAlmostEqual(p.xyxy[0], 40)
 
     def test_cut_and_video_reset(self):
-        self.tracker.update(self.frame, [det(10), det(20, 3)])
-        cut = self.tracker.update(np.full_like(self.frame, 255), [])
+        first = self.tracker.update(self.frame, [det(10), det(20, 3)])
+        previous_trackers = self.tracker.people
+        cut = self.tracker.update(np.full_like(self.frame, 255), [det(10)])
         self.assertTrue(cut.camera_cut)
         self.assertEqual(cut.segment, 1)
-        self.assertEqual(cut.tracks, ())
+        self.assertEqual(len(cut.tracks), 1)
+        self.assertGreater(cut.tracks[0].track_id, first.tracks[0].track_id)
         self.assertEqual(cut.ball_trajectory, ())
+        for previous, current in zip(previous_trackers, self.tracker.people, strict=True):
+            self.assertIsNot(previous, current)
+            self.assertIsNot(previous.gmc, current.gmc)
+            self.assertEqual(current.frame_id, 1)
         self.tracker.reset()
         self.assertEqual(self.tracker.update(self.frame, []).frame_index, 0)
 
     def test_invalid_inputs(self):
         for fps in (0, float('nan'), -1, True):
             with self.assertRaises(ValueError): Tracker(fps)
+        for invalid in ('strongsort', True, None, ['botsort']):
+            with self.subTest(people_tracker=invalid), self.assertRaisesRegex(ValueError, 'people_tracker'):
+                TrackingConfig(people_tracker=invalid)
         with self.assertRaises(ValueError): TrackingConfig(person_low=.5)
         with self.assertRaises(ValueError): self.tracker.update(self.frame, [det(199)])
         with self.assertRaises(ValueError): self.tracker.update(np.zeros((0, 2, 3), np.uint8), [])

@@ -29,7 +29,7 @@ $env:ULTRALYTICS_SAFE_LOAD = '1'
 
 The original checkpoint at `runs/detection-baseline-640-v2/weights/best.pt` matched SHA-256 `29135b3b60a241f006f88f042db57b7c60ad3c7f161454683338eea01cb4b94b`. The GSR checkpoint matched SHA-256 `d70da7d2234479b9247cb274b1b65519531bb0ce0bc3c5b712123f866279d2b2`.
 
-The annotation runner displays people detections at the operational confidence threshold. The tracking runner also passes people candidates down to the configured `person_low` (0.10 by default) to ByteTrack. Established tracks can use those candidates, so track confidence may be below 0.25. The tracker still admits ball candidates at 0.25 or higher, while raw dedicated ball diagnostics go down to 0.15. Tracking and downstream JSONL fields are unchanged, and the run summary records detector settings and candidate counts.
+The annotation runner displays people detections at the operational confidence threshold. The tracking runner also passes people candidates down to the configured `person_low` (0.10 by default) to the selected [people tracker](TRACKING.md). Established tracks can use those candidates, so track confidence may be below 0.25. The tracker still admits ball candidates at 0.25 or higher, while raw dedicated ball diagnostics go down to 0.15. Tracking and downstream JSONL fields are unchanged, and the run summary records detector settings and candidate counts.
 
 ### Integration verification
 

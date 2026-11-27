@@ -1,4 +1,5 @@
 {
+  "people_tracker": "botsort",
   "person_low": 0.1,
   "person_high": 0.25,
   "person_new": 0.25,

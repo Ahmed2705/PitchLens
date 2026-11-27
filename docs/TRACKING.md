@@ -1,6 +1,10 @@
 # Player and ball tracking
 
-The tracking pipeline uses [Candidate V2 and SoccerNet-v3D](DETECTION.md#default-video-detection). Candidate V2 runs at 640 pixels with a detection operating point of 0.25 and supplies candidates down to 0.10 for ByteTrack recovery. SoccerNet-v3D runs at 960 pixels with a detection cutoff of 0.15. The ball tracker keeps its 0.25 admission threshold. `lap` supplies the assignment solver required by the pinned Ultralytics ByteTrack implementation.
+The tracking pipeline uses [Candidate V2 and SoccerNet-v3D](DETECTION.md#default-video-detection). Candidate V2 runs at 640 pixels with a detection operating point of 0.25 and supplies people candidates down to 0.10. SoccerNet-v3D runs at 960 pixels with a detection cutoff of 0.15. The ball tracker keeps its 0.25 admission threshold.
+
+Ultralytics BoT-SORT is the default for players, goalkeepers and referees. Each class has its own tracker. BoT-SORT receives the original BGR frame, including on frames with no detections, for sparse optical-flow camera motion compensation (`sparseOptFlow`). ReID is disabled. Association and motion compensation run on the CPU with either detector device. `lap` supplies the assignment solver.
+
+The existing people thresholds apply to both backends. The low candidate floor is 0.10, the first-stage and new-track thresholds are 0.25, and the association threshold is 0.80. Lost tracks are retained for a one-second buffer converted to frames at the source FPS. Score fusion remains disabled. Use `--people-tracker bytetrack` or set `"people_tracker": "bytetrack"` in the tracking JSON to use ByteTrack. The CLI flag takes precedence over JSON. Existing tracking JSON files without `people_tracker` use BoT-SORT. The run summary records the active backend, motion compensation and ReID settings.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\track_video.py `
@@ -13,7 +17,15 @@ The output directory must exist. Use a fresh name: the MP4, JSONL and summary JS
 
 Each JSONL line represents one zero-indexed frame, with `segment`, `camera_cut`, `tracks` and `ball_trajectory`. Tracks have `xyxy` coordinates in original-frame pixels, `class_id`, `track_id`, `confidence`, and `observed`. Identify people by `(segment, class_id, track_id)` within a video. IDs are class-scoped and each new segment receives a numeric range above the IDs emitted in earlier segments. The new range carries no claim of player identity across shots. Person tracks are emitted when matched to a detection. A temporarily lost person may recover its ID after a gap in the same segment. Class changes can produce a new ID. The ball has no persistent ID. Predicted ball positions have `observed: false` and `confidence: null`. Trajectory entries are `[x, y, observed]`. Green denotes observed ball positions and orange denotes extrapolation. API users must call `reset()` between videos and submit every frame in order at the declared FPS.
 
-The ball starts at the highest-confidence candidate, then uses a constant-velocity prediction and selects candidates using confidence and distance within a frame-diagonal gate. It extrapolates for a bounded time and clears the trajectory when lost. ByteTrack score fusion is disabled so a consistent low-confidence new person can be confirmed using overlap. False positives can initialize or hijack a track, and fast motion, camera motion, occlusion or small detections can break it. ID switches remain possible, especially during occlusions. Quantitative tracking accuracy requires independently annotated footage.
+The ball starts at the highest-confidence candidate, then uses a constant-velocity prediction and selects candidates using confidence and distance within a frame-diagonal gate. It extrapolates for a bounded time and clears the trajectory when lost.
+
+In the prior two-clip evaluation using cached GSR player detections at 0.25, BoT-SORT produced longer observed tracks and recovered some earlier IDs after overlaps. The review also found an apparent ID swap after a crossing in FCB. False detections can acquire persistent IDs, and occlusion or class changes can fragment tracks. Identity accuracy requires independently annotated footage. The report is at `E:\PitchLensStorage\outputs\tracking-comparison-v1\tracking_evaluation_report.md`.
+
+## BoT-SORT integration verification
+
+All 203 automated tests passed with `python -B -m unittest discover -s tests`. The default CUDA run on `passes2.mp4` used Candidate V2, SoccerNet-v3D and BoT-SORT with sparse optical flow. It processed all 762 frames without errors, and the 1920 × 1080 MP4 decoded to the full frame count. The JSONL had consecutive frame indices and retained the track and downstream fields. The run emitted IDs for all three person classes, including 353 matched people track records below 0.25 confidence. The clip had no detected camera cuts. Automated tests exercised cut resets.
+
+Processing averaged 7.28 FPS on the RTX 2060 SUPER. The ball was observed on 609 of 762 frames (79.92%), predicted on 115 and absent on 38. Dedicated ball detections, ball tracks, ambiguity flags and trajectories matched the prior detection-integration output frame by frame. The video, JSONL, summary, run log and `verification.json` are in `E:\PitchLensStorage\outputs\botsort-integration-v1`.
 
 ## Hard camera cuts
 
@@ -21,7 +33,7 @@ The cut detector compares consecutive 160 × 90 color thumbnails. A substantial 
 
 In the tracking configuration, `cut_appearance_threshold` defaults to 0.055 and controls the minimum normalized color change examined on textured frames. `cut_threshold` defaults to 0.32 for transitions between two low-detail frames. Keeping `cut_threshold` at 1.0 disables cut detection as before. Existing configuration files can omit the new field.
 
-The first frame of a detected shot starts a fresh ByteTrack instance for each person class and clears the ball position, velocity, gap counter and trajectory. The same cut flag clears automatic team history and centroids, assisted per-track observations, and pitch homography smoothing history. Assisted reference prototypes remain available. A ball or pitch result on the cut frame requires observations from the new shot. Gradual transitions, very similar camera angles, fast motion with little common image area, and heavy occlusion can still confuse the detector.
+The first frame of a detected shot starts a fresh tracker for each person class, including new optical-flow history in BoT-SORT, and clears the ball position, velocity, gap counter and trajectory. The same cut flag clears automatic team history and centroids, assisted per-track observations, and pitch homography smoothing history. Assisted reference prototypes remain available. A ball or pitch result on the cut frame requires observations from the new shot. Gradual transitions, very similar camera angles, fast motion with little common image area, and heavy occlusion can still confuse the detector.
 
 The Foundation audit replay covered eight existing review strips with 201 distinct frame boundaries. The updated tracker found EGYPT 925, MAN 806, and LIV 209 and 358 at the exact incoming frame. The archived tracker missed all four. The updated tracker also left all 197 reviewed non-cut boundaries unflagged, including continuous motion in FCB and the fast MAN close-up after 806. LIV frames 545–726 remained sealed. The review strips are development evidence from four clips and do not establish general cut detection accuracy.
 
