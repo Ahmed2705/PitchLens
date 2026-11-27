@@ -8,6 +8,8 @@ import time
 
 import cv2
 import numpy as np
+import torch
+from pitchlens.ball_detector import BallDetector, BallDetectorConfig, combine_detections
 from pitchlens.detector import CLASS_NAMES, Detector
 from pitchlens.pass_detection import PassConfig, PassDetector
 from pitchlens.possession import PossessionAnalytics, PossessionConfig
@@ -53,6 +55,8 @@ def main():
     p.add_argument('--input', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True, help='New MP4 path; JSONL and summary use the same stem')
     p.add_argument('--weights', type=Path, required=True)
+    p.add_argument('--ball-weights', type=Path, help='Optional local SoccerNet-v3D ball checkpoint')
+    p.add_argument('--ball-config', type=Path, help='JSON overrides for dedicated ball inference')
     p.add_argument('--config', type=Path, default=Path('configs/tracking.json'))
     p.add_argument('--team-config', type=Path, default=None)
     p.add_argument('--team-references', type=Path, help='JSON mapping team 1 and 2 to paths of labeled crop images')
@@ -67,6 +71,8 @@ def main():
     p.add_argument('--device', choices=('auto', 'cpu', 'cuda'), default='auto')
     p.add_argument('--max-frames', type=int, default=None, help='Optional limit for a short smoke check')
     args = p.parse_args()
+    if args.ball_config and not args.ball_weights:
+        p.error('--ball-config requires --ball-weights')
     if (args.team_references is None) != (args.siglip_snapshot is None):
         p.error('--team-references and --siglip-snapshot must be supplied together')
     if args.max_frames is not None and args.max_frames < 1:
@@ -87,6 +93,12 @@ def main():
     if not args.output.parent.is_dir():
         raise ValueError('Output directory must exist')
     config = TrackingConfig(**json.loads(args.config.read_text(encoding='utf-8-sig')))
+    ball_config = None
+    if args.ball_weights:
+        overrides = json.loads(args.ball_config.read_text(encoding='utf-8-sig')) if args.ball_config else {}
+        if not isinstance(overrides, dict):
+            raise ValueError('Dedicated ball configuration must be a JSON object')
+        ball_config = BallDetectorConfig(**overrides)
     cap = cv2.VideoCapture(str(args.input))
     if not cap.isOpened():
         raise ValueError('Cannot open input video')
@@ -99,6 +111,7 @@ def main():
         if width % 2 or height % 2:
             raise ValueError('Video dimensions must be even for MP4 output')
         detector = Detector(args.weights, confidence=config.person_low, class_confidence={3: config.ball_confidence}, image_size=960, device=args.device)
+        ball_detector = BallDetector(args.ball_weights, ball_config, device=args.device) if ball_config else None
         tracker = Tracker(fps, config)
         team_colors = {1: (255, 120, 0), 2: (220, 0, 220)}
         possession_overrides = (
@@ -166,6 +179,7 @@ def main():
         frames = cuts = observed = predicted = 0
         possession_elapsed = 0.
         pass_elapsed = 0.
+        ball_elapsed = 0.
         displayed_event = None
         display_seconds = 0.
         start = time.perf_counter()
@@ -175,9 +189,17 @@ def main():
                 if not ok:
                     break
                 timestamp_seconds = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
-                tracked = tracker.update(frame, detector.detect(frame))
+                general_detections = detector.detect(frame)
+                ball_detections = None
+                if ball_detector is not None:
+                    ball_start = time.perf_counter()
+                    ball_detections = ball_detector.detect(frame)
+                    ball_elapsed += time.perf_counter() - ball_start
+                tracked = tracker.update(frame, combine_detections(general_detections, ball_detections))
                 assignments = teams.update(frame, tracked)
                 record = asdict(tracked)
+                if ball_detections is not None:
+                    record['raw_ball_detections'] = [asdict(detection) for detection in ball_detections]
                 for item, team in zip(record['tracks'], assignments):
                     item['team'] = team
                 possession_start = time.perf_counter()
@@ -264,6 +286,16 @@ def main():
             'config': asdict(passes.config), 'analysis_ms_per_frame': 1000 * pass_elapsed / frames,
             **passes.finish(),
         }
+        if ball_detector is not None:
+            summary['dedicated_ball'] = {
+                'weights': str(args.ball_weights.resolve()),
+                'config': asdict(ball_config),
+                'tracker_confidence': config.ball_confidence,
+                'inference_ms_per_frame': 1000 * ball_elapsed / frames,
+            }
+            if ball_detector.device.startswith('cuda'):
+                summary['cuda_peak_allocated_bytes'] = torch.cuda.max_memory_allocated(ball_detector.device)
+                summary['cuda_peak_reserved_bytes'] = torch.cuda.max_memory_reserved(ball_detector.device)
         if args.pitch_weights:
             summary['pitch'] = {'checkpoint_sha256': CHECKPOINT_SHA256, 'config': asdict(pitch),
                                 'temporal_enabled': args.pitch_temporal and pitch.recovery_seconds > 0,

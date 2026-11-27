@@ -19,6 +19,14 @@ os.environ.setdefault("YOLO_AUTOINSTALL", "False")
 from ultralytics import YOLO  # noqa: E402
 
 CLASS_NAMES = ("player", "goalkeeper", "referee", "ball")
+BALL_CLASS_ID = CLASS_NAMES.index("ball")
+
+
+def validate_inference_settings(confidence: float, image_size: int) -> None:
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+        raise ValueError("confidence must be a finite number between 0 and 1")
+    if isinstance(image_size, bool) or not isinstance(image_size, int) or image_size < 32 or image_size % 32:
+        raise ValueError("image_size must be a positive multiple of 32")
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,9 +47,9 @@ class Detector:
         path = Path(weights).expanduser()
         if not path.is_file():
             raise FileNotFoundError(f"Detector weights not found: {path}")
-        for name, value in (("confidence", confidence), ("iou", iou)):
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1:
-                raise ValueError(f"{name} must be a finite number between 0 and 1")
+        validate_inference_settings(confidence, image_size)
+        if isinstance(iou, bool) or not isinstance(iou, (int, float)) or not math.isfinite(iou) or not 0 <= iou <= 1:
+            raise ValueError("iou must be a finite number between 0 and 1")
         if class_confidence is not None and not isinstance(class_confidence, Mapping):
             raise ValueError("class_confidence must map class IDs to thresholds")
         for category, value in (class_confidence or {}).items():
@@ -49,8 +57,6 @@ class Detector:
                 raise ValueError("class_confidence contains an invalid class ID")
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1:
                 raise ValueError("class_confidence thresholds must be finite numbers between 0 and 1")
-        if isinstance(image_size, bool) or not isinstance(image_size, int) or image_size < 32 or image_size % 32:
-            raise ValueError("image_size must be a positive multiple of 32")
         if device not in ("auto", "cpu", "cuda"):
             raise ValueError("device must be 'auto', 'cpu', or 'cuda'")
         if device == "cuda" and not torch.cuda.is_available():
@@ -61,10 +67,14 @@ class Detector:
         self.iou = float(iou)
         self.image_size = image_size
         self._model = YOLO(str(path))
+        self._class_ids = self._class_mapping()
+
+    def _class_mapping(self) -> dict[int, int]:
         names = self._model.names
         actual = tuple(names.get(i) for i in range(len(names))) if isinstance(names, dict) else tuple(names)
         if self._model.task != "detect" or actual != CLASS_NAMES:
             raise ValueError(f"Expected a four-class PitchLens detection model, got {actual}")
+        return dict(enumerate(range(len(CLASS_NAMES))))
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
         """Detect objects in one nonempty H×W×3 OpenCV BGR frame.
@@ -90,9 +100,10 @@ class Detector:
         for xyxy, category, score in zip(coordinates, classes, scores, strict=True):
             if not all(math.isfinite(float(value)) for value in (*xyxy, category, score)):
                 raise ValueError("Model returned non-finite detection values")
-            class_id = int(category)
-            if category != class_id or not 0 <= class_id < len(CLASS_NAMES) or not 0 <= score <= 1:
+            model_class = int(category)
+            if category != model_class or model_class not in self._class_ids or not 0 <= score <= 1:
                 raise ValueError("Model returned an invalid class ID or confidence")
+            class_id = self._class_ids[model_class]
             if score < self.class_confidence.get(class_id, self.confidence):
                 continue
             x1, y1, x2, y2 = (float(value) for value in xyxy)
