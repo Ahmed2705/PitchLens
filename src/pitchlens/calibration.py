@@ -1,12 +1,13 @@
-"""Estimate a fresh image-to-pitch mapping from each frame's pitch landmarks."""
+"""Estimate and validate image-to-pitch mappings for video frames."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 import cv2
 import numpy as np
 
 from pitchlens.pitch_lines import PitchLineCheck
+from pitchlens.pitch_motion import estimate_pitch_motion, motion_image, pitch_features
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,10 @@ class PitchConfig:
     reprojection_fraction: float = 0.004
     smoothing: float = 0.35
     extrapolation_fraction: float = 0.06
+    recovery_seconds: float = 0.5
+    recovery_min_tracks: int = 12
+    recovery_min_inliers: int = 10
+    recovery_min_inlier_ratio: float = 0.70
 
     def __post_init__(self):
         if not 50 <= self.length_m <= 130 or not 41 <= self.width_m <= 100:
@@ -29,6 +34,11 @@ class PitchConfig:
                 and 0 < self.reprojection_fraction <= 0.02 and 0 <= self.smoothing < 1
                 and 0 <= self.extrapolation_fraction <= 0.2):
             raise ValueError('Invalid pitch calibration thresholds')
+        if not (math.isfinite(self.recovery_seconds) and 0 <= self.recovery_seconds
+                and type(self.recovery_min_tracks) is int and type(self.recovery_min_inliers) is int
+                and 6 <= self.recovery_min_inliers <= self.recovery_min_tracks <= 200
+                and 0.5 <= self.recovery_min_inlier_ratio <= 1):
+            raise ValueError('Invalid temporal calibration thresholds')
 
     def landmarks(self) -> np.ndarray:
         """Roboflow pose indices 1–32 with regulation markings in meters."""
@@ -87,6 +97,15 @@ class Calibration:
     mean_landmark_confidence: float | None = None
     stabilized: bool = False
     reason: str | None = None
+    recovery_age_seconds: float | None = None
+    motion_inliers: int | None = None
+    motion_rmse_px: float | None = None
+
+    @property
+    def provenance(self) -> str:
+        if self.image_to_pitch is None:
+            return 'unavailable'
+        return 'temporal' if self.recovery_age_seconds is not None else 'direct'
 
     def metadata(self) -> dict:
         return {
@@ -96,6 +115,10 @@ class Calibration:
             'reprojection_rmse_px': self.reprojection_rmse_px,
             'mean_landmark_confidence': self.mean_landmark_confidence,
             'stabilized': self.stabilized,
+            'provenance': self.provenance,
+            'recovery_age_seconds': self.recovery_age_seconds,
+            'motion_inliers': self.motion_inliers,
+            'motion_rmse_px': self.motion_rmse_px,
         }
 
     def map_contact(self, xyxy: tuple[float, float, float, float]) -> dict:
@@ -123,18 +146,127 @@ class Calibration:
                 'status': 'valid' if distance >= -0.001 else 'estimated'}
 
 
-class PitchCalibrator:
-    """Robustly fit in pixels, then smooth only against verified current evidence."""
+def fit_quality(candidate: np.ndarray, world: np.ndarray, image: np.ndarray,
+                threshold: float, diagonal: float) -> tuple[np.ndarray, float] | None:
+    """Validate depth, residual and local projection conditioning on supported points."""
+    if not np.isfinite(candidate).all():
+        return None
+    denominators = np.column_stack((world, np.ones(len(world)))) @ candidate[2]
+    if np.any(np.abs(denominators) < 1e-8) or np.min(denominators) * np.max(denominators) <= 0:
+        return None
+    projected = project(candidate, world)
+    residual = np.linalg.norm(projected - image, axis=1)
+    if not np.isfinite(residual).all() or residual.max() > threshold:
+        return None
+    jacobian_x = project(candidate, world + [0.01, 0]) - projected
+    jacobian_y = project(candidate, world + [0, 0.01]) - projected
+    jacobian = np.stack((jacobian_x, jacobian_y), axis=-1)
+    if not np.isfinite(jacobian).all():
+        return None
+    try:
+        singular = np.linalg.svd(jacobian, compute_uv=False)
+        inverse = np.linalg.inv(candidate)
+    except np.linalg.LinAlgError:
+        return None
+    if np.any((singular[:, 0] > 0.01 * diagonal) | (singular[:, 1] < 0.0004)
+              | (singular[:, 0] > 30 * singular[:, 1])):
+        return None
+    scale = np.max(np.abs(inverse))
+    if not np.isfinite(scale) or scale == 0:
+        return None
+    return inverse / scale, float(np.sqrt(np.mean(residual ** 2)))
 
-    def __init__(self, config: PitchConfig, *, legacy_validation: bool = False):
+
+@dataclass
+class RecoveryAnchor:
+    frame: np.ndarray
+    fit: Calibration
+    pitch_to_image: np.ndarray
+    scale: float
+    age_frames: int = 0
+    gray: np.ndarray | None = None
+    features: np.ndarray | None = None
+
+
+class PitchCalibrator:
+    """Fit current landmarks first and recover briefly from the last direct fit."""
+
+    def __init__(self, config: PitchConfig, *, legacy_validation: bool = False,
+                 fps: float | None = None):
+        if fps is not None and (not math.isfinite(fps) or fps <= 0):
+            raise ValueError('Calibration FPS must be finite and positive')
         self.config = config
         self.world = config.landmarks()
         self.legacy_validation = legacy_validation
         self.line_check = None if legacy_validation else PitchLineCheck(self.world)
         self.previous: np.ndarray | None = None
+        self.fps = fps
+        self.anchor: RecoveryAnchor | None = None
 
     def update(self, observations: np.ndarray | None, shape: tuple[int, ...],
                camera_cut: bool = False, *, frame: np.ndarray | None = None) -> Calibration:
+        """Process one video frame in order. Supply FPS and pixels to enable recovery."""
+        fit = self._direct(observations, shape, camera_cut, frame)
+        anchor = self.anchor
+        self.anchor = None
+        if self.fps is None or self.line_check is None or not self.config.recovery_seconds or frame is None:
+            return fit
+        if fit.image_to_pitch is not None:
+            scale = min(1., 960 / max(fit.frame_size))
+            self.anchor = RecoveryAnchor(motion_image(frame, scale), fit, self.previous, scale)
+            return fit
+        if camera_cut or anchor is None or anchor.fit.frame_size != fit.frame_size:
+            return fit
+        anchor.age_frames += 1
+        age = anchor.age_frames / self.fps
+        if age > self.config.recovery_seconds:
+            return fit
+        recovered = self._recover(anchor, fit, frame, age)
+        if recovered is None:
+            return fit
+        self.anchor = anchor
+        return recovered
+
+    def _recover(self, anchor: RecoveryAnchor, failed: Calibration, frame: np.ndarray,
+                 age: float) -> Calibration | None:
+        config = self.config
+        scale = anchor.scale
+        prior_hull = anchor.fit.hull
+        if anchor.gray is None:
+            anchor.gray = cv2.cvtColor(anchor.frame, cv2.COLOR_BGR2GRAY)
+            anchor.features = pitch_features(anchor.frame, anchor.gray, prior_hull * scale)
+        if anchor.features is None:
+            return None
+        current = cv2.cvtColor(motion_image(frame, scale), cv2.COLOR_BGR2GRAY)
+        motion = estimate_pitch_motion(anchor.gray, current, anchor.features, config.recovery_min_tracks,
+                                       config.recovery_min_inliers, config.recovery_min_inlier_ratio)
+        if motion is None:
+            return None
+        transform, source, target = motion
+        # Undo the working-image scale, then move the anchor's pitch projection
+        # into the current image. Its inverse maps current pixels to the pitch.
+        transform[:2, 2] /= scale
+        candidate = transform @ anchor.pitch_to_image
+        source, target = source / scale, target / scale
+        hull = cv2.convexHull(target)
+        area, hull = cv2.intersectConvexConvex(
+            hull, project(transform, prior_hull.reshape(-1, 2)).astype(np.float32))
+        width, height = failed.frame_size
+        if area < max(0.01 * width * height, 0.15 * cv2.contourArea(prior_hull)):
+            return None
+        world = project(anchor.fit.image_to_pitch, source)
+        diagonal = math.hypot(width, height)
+        checked = fit_quality(candidate, world, target, 2. / scale, diagonal)
+        if checked is None:
+            return None
+        depth_sign = np.sign(candidate[2] @ [*world[0], 1])
+        if self.line_check.rejection(frame, candidate, depth_sign) is not None:
+            return None
+        return replace(failed, image_to_pitch=checked[0], hull=hull, reason=None,
+                       recovery_age_seconds=age, motion_inliers=len(target), motion_rmse_px=checked[1])
+
+    def _direct(self, observations: np.ndarray | None, shape: tuple[int, ...],
+                camera_cut: bool, frame: np.ndarray | None) -> Calibration:
         previous = None if camera_cut else self.previous
         self.previous = None
         height, width = shape[:2]
@@ -186,36 +318,7 @@ class PitchCalibrator:
                     return Calibration(config, frame_size, candidates=count, inliers=inliers,
                                        reason='unstable_support')
 
-        def quality(candidate: np.ndarray) -> tuple[np.ndarray, float] | None:
-            # A horizon through the support or an ill-conditioned local mapping is unsafe.
-            if not np.isfinite(candidate).all():
-                return None
-            denominators = np.column_stack((world, np.ones(inliers))) @ candidate[2]
-            if np.any(np.abs(denominators) < 1e-8) or np.min(denominators) * np.max(denominators) <= 0:
-                return None
-            projected = project(candidate, world)
-            residual = np.linalg.norm(projected - image, axis=1)
-            if not np.isfinite(residual).all() or residual.max() > threshold:
-                return None
-            jacobian_x = project(candidate, world + [0.01, 0]) - projected
-            jacobian_y = project(candidate, world + [0, 0.01]) - projected
-            jacobian = np.stack((jacobian_x, jacobian_y), axis=-1)
-            if not np.isfinite(jacobian).all():
-                return None
-            try:
-                singular = np.linalg.svd(jacobian, compute_uv=False)
-                inverse = np.linalg.inv(candidate)
-            except np.linalg.LinAlgError:
-                return None
-            if np.any((singular[:, 0] > 0.01 * diagonal) | (singular[:, 1] < 0.0004)
-                      | (singular[:, 0] > 30 * singular[:, 1])):
-                return None
-            scale = np.max(np.abs(inverse))
-            if not np.isfinite(scale) or scale == 0:
-                return None
-            return inverse / scale, float(np.sqrt(np.mean(residual ** 2)))
-
-        result = quality(matrix)
+        result = fit_quality(matrix, world, image, threshold, diagonal)
         if result is None:
             return Calibration(config, frame_size, candidates=count, inliers=inliers, reason='unreliable_geometry')
 
@@ -235,7 +338,8 @@ class PitchCalibrator:
             if np.all(np.linalg.norm(prior - current, axis=1) <= 2 * threshold):
                 blended = current + config.smoothing * (prior - current)
                 smoothed, _ = cv2.findHomography(world, blended, 0)
-                checked = quality(smoothed) if smoothed is not None else None
+                checked = (fit_quality(smoothed, world, image, threshold, diagonal)
+                           if smoothed is not None else None)
                 if checked is not None and paint_rejection(smoothed) is None:
                     matrix, result, stabilized = smoothed, checked, True
         self.previous = matrix

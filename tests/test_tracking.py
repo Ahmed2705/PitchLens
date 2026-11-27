@@ -32,11 +32,22 @@ class TrackingTests(unittest.TestCase):
         self.tracker.update(self.frame, [det(20, 3)])
         b = self.tracker.update(self.frame, [det(22, 3, .6), det(150, 3, .99)])
         self.assertLess(b.tracks[0].xyxy[0], 30)
+        self.assertFalse(b.ball_observation_ambiguous)
         p = self.tracker.update(self.frame, [])
         self.assertFalse(p.tracks[0].observed)
         self.assertIsNone(p.tracks[0].confidence)
         self.tracker.update(self.frame, [])
         self.assertTrue(self.tracker.update(self.frame, [det(150, 3)]).tracks[0].observed)
+
+    def test_ball_competition_is_reported_without_changing_tracker_choice(self):
+        first = self.tracker.update(self.frame, [det(20, 3), det(120, 3, .7)])
+        self.assertTrue(first.ball_observation_ambiguous)
+        self.assertTrue(first.tracks[0].observed)
+        self.assertEqual(first.tracks[0].xyxy[0], 20.)
+        second = self.tracker.update(self.frame, [det(21, 3), det(26, 3, .8)])
+        self.assertTrue(second.ball_observation_ambiguous)
+        self.assertEqual(second.tracks[0].xyxy[0], 21.)
+        self.assertFalse(self.tracker.update(self.frame, [det(22, 3)]).ball_observation_ambiguous)
 
     def test_person_boxes_are_clipped_at_image_edge(self):
         for x in (10, 7, 4, 1, 0, 0):

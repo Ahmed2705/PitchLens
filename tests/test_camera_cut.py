@@ -175,7 +175,7 @@ class CameraCutTests(unittest.TestCase):
         detector.detect.side_effect = detections
         capture = Mock()
         capture.get.side_effect = {cv2.CAP_PROP_FPS: 30., cv2.CAP_PROP_FRAME_WIDTH: 320.,
-                                   cv2.CAP_PROP_FRAME_HEIGHT: 180.}.__getitem__
+                                   cv2.CAP_PROP_FRAME_HEIGHT: 180., cv2.CAP_PROP_POS_MSEC: 0.}.__getitem__
         frames = [before, before, after, after, before]
         capture.read.side_effect = [(True, frame.copy()) for frame in frames] + [(False, None)]
 
@@ -196,6 +196,7 @@ class CameraCutTests(unittest.TestCase):
                   patch("builtins.print")):
                 track_video.main()
             rows = [json.loads(line) for line in output.with_suffix(".jsonl").read_text().splitlines()]
+            summary = json.loads(output.with_suffix(".json").read_text())
 
         self.assertEqual([row["camera_cut"] for row in rows], [False, False, True, False, True])
         self.assertEqual([row["segment"] for row in rows], [0, 0, 1, 1, 2])
@@ -216,6 +217,18 @@ class CameraCutTests(unittest.TestCase):
         self.assertTrue(after_cut["calibration"]["stabilized"])
         self.assertFalse(second_cut["calibration"]["valid"])
         self.assertEqual(second_cut["tracks"][0]["pitch"], {"status": "unavailable", "xy_m": None})
+        self.assertEqual(first["movement_timing"]["source"], "frame_index_fps")
+        self.assertTrue(any(item["movement"]["accepted_segments"] == 1
+                            for item in first["tracks"] if item["class_id"] in (0, 1)))
+        for cut in (first_cut, second_cut):
+            self.assertIsNone(cut["possession"]["owner"])
+            self.assertAlmostEqual(cut["possession"]["timing"]["elapsed_seconds"], 1 / 30)
+            self.assertEqual(cut["possession"]["timing"]["credited_player_seconds"], 0.)
+            self.assertIsNone(cut["movement_timing"]["elapsed_seconds"])
+            for item in cut["tracks"]:
+                self.assertIsNone(item["movement"]["speed_kmh"])
+                self.assertIsNone(item["movement"]["observed_distance_m"])
+        self.assertEqual({item["segment"] for item in summary["movement"]["tracks"]}, {0, 1, 2})
 
 
 if __name__ == "__main__":

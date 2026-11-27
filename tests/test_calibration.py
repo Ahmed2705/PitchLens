@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -6,6 +7,7 @@ import numpy as np
 from pitchlens.calibration import PitchCalibrator, PitchConfig, project
 from pitchlens.pitch_lines import STRAIGHT_MARKINGS
 from pitchlens.pitch_minimap import PitchMinimap
+from pitchlens.pitch_motion import estimate_pitch_motion
 
 
 class PitchCalibrationTests(unittest.TestCase):
@@ -28,6 +30,107 @@ class PitchCalibrationTests(unittest.TestCase):
             color = (52, 115, 62) if name == faint_marking else (220, 225, 220)
             cv2.line(frame, start, end, color, 1 if faint_marking else 2)
         return frame
+
+    def textured_pitch(self):
+        frame = self.painted_frame()
+        # Turf texture supplies static corners without changing the paint.
+        random = np.random.default_rng(42)
+        for x, y in random.integers([110, 85], [850, 430], size=(800, 2)):
+            if frame[y, x, 1] < 150:
+                cv2.circle(frame, (int(x), int(y)), 2, (35, 82, 38), -1)
+        return frame
+
+    def test_temporal_recovers_known_pan_zoom_and_maps_contact(self):
+        calibrator = PitchCalibrator(self.config, fps=25)
+        frame = self.textured_pitch()
+        direct = calibrator.update(self.observe(), self.shape, frame=frame)
+        self.assertEqual(direct.provenance, 'direct')
+        self.assertIsNone(direct.metadata()['recovery_age_seconds'])
+        for age, (zoom, dx, dy) in enumerate(((1.01, 9, -5), (1.02, 18, -10)), 1):
+            motion = np.array([[zoom, 0., dx], [0., zoom, dy], [0., 0., 1.]])
+            moved = cv2.warpAffine(frame, motion[:2], direct.frame_size)
+            result = calibrator.update(None, self.shape, frame=moved)
+            metadata = result.metadata()
+            self.assertEqual(metadata['provenance'], 'temporal', metadata)
+            self.assertEqual(metadata['recovery_age_seconds'], age / 25)
+            self.assertGreaterEqual(metadata['motion_inliers'], self.config.recovery_min_inliers)
+            self.assertIsNone(metadata['reprojection_rmse_px'])
+            ground = np.array([[30., 22.], [45., 32.], [60., 41.]])
+            pixels = project(motion @ self.camera, ground)
+            np.testing.assert_allclose(project(result.image_to_pitch, pixels), ground, atol=0.10)
+            x, y = pixels[0]
+            np.testing.assert_allclose(result.map_contact((x-5, y-20, x+5, y))['xy_m'],
+                                       ground[0], atol=0.10)
+
+    def test_temporal_expiration_uses_fps_and_never_refreshes_from_recovery(self):
+        for fps in (4, 8):
+            with self.subTest(fps=fps):
+                calibrator = PitchCalibrator(self.config, fps=fps)
+                frame = self.textured_pitch()
+                self.assertEqual(calibrator.update(self.observe(), self.shape, frame=frame).provenance, 'direct')
+                for index in range(1, fps // 2 + 1):
+                    recovered = calibrator.update(None, self.shape, frame=frame)
+                    self.assertEqual(recovered.provenance, 'temporal')
+                    self.assertEqual(recovered.recovery_age_seconds, index / fps)
+                for _ in range(2):
+                    result = calibrator.update(None, self.shape, frame=frame)
+                    self.assertEqual(result.provenance, 'unavailable')
+                    self.assertEqual(result.map_contact((300, 170, 310, 200)),
+                                     {'xy_m': None, 'status': 'unavailable'})
+
+    def test_cut_clears_anchor_and_direct_fit_has_priority_when_it_returns(self):
+        calibrator = PitchCalibrator(self.config, fps=25)
+        frame = self.textured_pitch()
+        points = self.observe()
+        self.assertEqual(calibrator.update(points, self.shape, frame=frame).provenance, 'direct')
+        self.assertEqual(calibrator.update(None, self.shape, frame=frame).provenance, 'temporal')
+        cut = calibrator.update(None, self.shape, camera_cut=True, frame=frame)
+        self.assertEqual(cut.provenance, 'unavailable')
+        self.assertEqual(calibrator.update(None, self.shape, frame=frame).provenance, 'unavailable')
+        self.assertEqual(calibrator.update(points, self.shape, frame=frame).provenance, 'direct')
+        self.assertEqual(calibrator.update(None, self.shape, frame=frame).provenance, 'temporal')
+        with patch('pitchlens.calibration.estimate_pitch_motion', side_effect=AssertionError):
+            direct = calibrator.update(points, self.shape, frame=frame)
+        self.assertEqual(direct.provenance, 'direct')
+        self.assertFalse(direct.stabilized)
+        self.assertEqual(calibrator.update(None, self.shape, frame=frame).recovery_age_seconds, 1 / 25)
+
+    def test_failed_motion_and_current_paint_do_not_propagate(self):
+        frame = self.textured_pitch()
+        for mocked in (None, 'scripted_motion'):
+            with self.subTest(motion=mocked):
+                calibrator = PitchCalibrator(self.config, fps=25)
+                calibrator.update(self.observe(), self.shape, frame=frame)
+                support = project(self.camera, np.array([(x, y) for x in (10, 30, 55, 75)
+                                                        for y in (10, 25, 40)])).astype(np.float32)
+                if mocked:
+                    # Corroborate identity with tracks but put the actual paint elsewhere.
+                    motion = np.eye(3), support * 0.75, support * 0.75
+                    pixels = np.roll(frame, 15, axis=1)
+                else:
+                    motion, pixels = None, frame
+                with patch('pitchlens.calibration.estimate_pitch_motion', return_value=motion):
+                    rejected = calibrator.update(None, self.shape, frame=pixels)
+                self.assertEqual(rejected.provenance, 'unavailable')
+                self.assertEqual(calibrator.update(None, self.shape, frame=frame).provenance, 'unavailable')
+
+    def test_motion_rejects_insufficient_tracks_inliers_and_implausible_zoom(self):
+        gray = cv2.cvtColor(self.textured_pitch(), cv2.COLOR_BGR2GRAY)
+        features = cv2.goodFeaturesToTrack(gray, 30, 0.01, 8)
+        self.assertIsNone(estimate_pitch_motion(gray, gray, features[:11], 12, 10, .7))
+        for affine, num_inliers in ((np.eye(2, 3), 9), (np.eye(2, 3) * 2, 30)):
+            with self.subTest(num_inliers=num_inliers):
+                mask = (np.arange(30) < num_inliers).astype(np.uint8)
+                with patch('pitchlens.pitch_motion.cv2.estimateAffinePartial2D', return_value=(affine, mask)):
+                    self.assertIsNone(estimate_pitch_motion(gray, gray, features, 12, 10, .7))
+
+    def test_disabled_temporal_calibration_keeps_direct_only(self):
+        frame = self.textured_pitch()
+        calibrator = PitchCalibrator(PitchConfig(recovery_seconds=0), fps=25)
+        self.assertEqual(calibrator.update(self.observe(), self.shape, frame=frame).provenance, 'direct')
+        self.assertEqual(calibrator.update(None, self.shape, frame=frame).provenance, 'unavailable')
+        with self.assertRaises(ValueError):
+            PitchCalibrator(self.config, fps=0)
 
     def test_concentrated_landmarks_reject_an_exact_fit(self):
         camera = np.array([[3., 0., 400.], [0., 3., 200.], [0., 0., 1.]])

@@ -1,4 +1,4 @@
-"""Compare pitch template or validation variants with frozen v9 predictions."""
+"""Compare calibration variants using shared v9 predictions."""
 
 import argparse
 from collections import Counter
@@ -6,6 +6,7 @@ from dataclasses import asdict
 import hashlib
 import json
 from pathlib import Path
+from time import perf_counter
 import warnings
 from zipfile import ZipFile
 
@@ -90,9 +91,14 @@ def compare_frame(detector, frame, pair, cut=False, expected=None, markings=None
     row = {'shape': list(frame.shape[:2]), 'predictions': evidence, 'cut': cut}
     if expected is not None:
         row['annotation'], available = label_diagnostics(*expected, observations, frame.shape, pair)
+    time_calibration = 'temporal' in pair
     for name, calibrator in pair.items():
+        start = perf_counter() if time_calibration else None
         fit = calibrator.update(observations, frame.shape, camera_cut=cut, frame=frame)
+        elapsed_ms = 1000 * (perf_counter() - start) if start is not None else None
         result = row[name] = fit.metadata()
+        if elapsed_ms is not None:
+            result['calibration_ms'] = elapsed_ms
         result['image_to_pitch'] = None
         if fit.image_to_pitch is not None:
             result['image_to_pitch'] = fit.image_to_pitch.tolist()
@@ -138,8 +144,18 @@ def summarize(rows, mode, variants=VARIANTS):
             'accepted': len(accepted), 'stabilized': sum(item['stabilized'] for item in accepted),
             'rejections': dict(Counter(item['reason'] for item in items if not item['valid'])),
             'landmark_counts': dict(Counter(item['landmarks'] for item in items)),
-            'inlier_rmse_px': distribution([item['reprojection_rmse_px'] for item in accepted]),
+            'inlier_rmse_px': distribution([item['reprojection_rmse_px'] for item in accepted
+                                            if item.get('provenance') != 'temporal']),
         }
+        if after == 'temporal':
+            recovered = [item for item in accepted if item['provenance'] == 'temporal']
+            summary[name].update(
+                provenance=dict(Counter(item['provenance'] for item in items)),
+                recovery_age_seconds=distribution([item['recovery_age_seconds'] for item in recovered]),
+                motion_rmse_px=distribution([item['motion_rmse_px'] for item in recovered]),
+                calibration_ms=distribution([item['calibration_ms'] for item in items]),
+                mean_calibration_ms=float(np.mean([item['calibration_ms'] for item in items])),
+            )
         if mode == 'roboflow':
             if name in VARIANTS:
                 summary[name]['annotation_fit_accepted'] = sum(
@@ -275,7 +291,7 @@ def video_decode_status(reported, decoded, stop_before):
             'stop_before': stop_before, 'status': status}
 
 
-def video_rows(args, detector, pair, decoding):
+def video_rows(args, detector, pair, decoding, *, temporal=False):
     from pitchlens.tracking import Tracker
 
     capture = cv2.VideoCapture(str(args.input))
@@ -283,7 +299,10 @@ def video_rows(args, detector, pair, decoding):
         if not capture.isOpened():
             raise ValueError(f'Cannot open {args.input}')
         reported = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
-        tracker = Tracker(capture.get(cv2.CAP_PROP_FPS))
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        tracker = Tracker(fps)
+        if temporal:
+            pair['temporal'] = PitchCalibrator(pair['validated'].config, fps=fps)
         frame_index = 0
         while args.stop_before is None or frame_index < args.stop_before:
             ok, frame = capture.read()
@@ -336,7 +355,10 @@ def video_overlays(path, output, rows, markings, variants=VARIANTS, include=()):
                         cv2.putText(panel, str(index), (round(x) + 5, round(y) - 5),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 255), 2)
                 panel = cv2.resize(panel, (800, round(800 * frame.shape[0] / frame.shape[1])))
-                caption = f'{row["id"]} {name}: {item["inliers"]}/{item["landmarks"]} {item["reason"] or "accepted"}'
+                detail = item['reason'] or item.get('provenance', 'accepted')
+                if item.get('recovery_age_seconds') is not None:
+                    detail += f' {item["recovery_age_seconds"]:.2f}s'
+                caption = f'{row["id"]} {name}: {item["inliers"]}/{item["landmarks"]} {detail}'
                 cv2.putText(panel, caption, (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 4)
                 cv2.putText(panel, caption, (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1)
                 panels.append(panel)
@@ -359,6 +381,8 @@ def main():
     parser.add_argument('--stop-before', type=int, help='Exclusive video frame limit')
     parser.add_argument('--reliability', action='store_true',
                         help='Compare corrected-template baseline with new validation on development inputs')
+    parser.add_argument('--temporal', action='store_true',
+                        help='Compare strict direct validation with temporal recovery on video')
     parser.add_argument('--overlay-frame', type=int, action='append', default=[],
                         help='Include a zero-based frame in the video comparison overlays')
     args = parser.parse_args()
@@ -368,6 +392,8 @@ def main():
         parser.error('--stop-before must be a positive frame index in video mode')
     if args.reliability and args.mode == 'soccernet':
         parser.error('--reliability is available only for development inputs')
+    if args.temporal and (args.mode != 'video' or args.reliability):
+        parser.error('--temporal requires video mode and cannot be used with --reliability')
     if args.overlay_frame and (args.mode != 'video' or min(args.overlay_frame) < 0):
         parser.error('--overlay-frame requires a nonnegative video frame index')
     if args.overlay_frame and args.stop_before is not None and max(args.overlay_frame) >= args.stop_before:
@@ -378,14 +404,14 @@ def main():
     from pitchlens.pitch_landmarks import CHECKPOINT_SHA256, PitchLandmarkDetector
 
     config = PitchConfig()
-    pair = compare_calibrators(config, args.reliability)
+    pair = {'validated': PitchCalibrator(config)} if args.temporal else compare_calibrators(config, args.reliability)
     markings = planar_markings(config)
     detector = PitchLandmarkDetector(args.weights, args.device)
     args.output.mkdir()
     rows = []
     decoding = {}
     if args.mode == 'video':
-        source = video_rows(args, detector, pair, decoding)
+        source = video_rows(args, detector, pair, decoding, temporal=args.temporal)
     elif args.mode == 'roboflow':
         source = roboflow_rows(args, detector, pair)
     else:

@@ -57,6 +57,7 @@ class FrameTracks:
     camera_cut: bool
     tracks: tuple[Track, ...]
     ball_trajectory: tuple[tuple[float, float, bool], ...]
+    ball_observation_ambiguous: bool = False
 
 
 class Tracker:
@@ -126,7 +127,8 @@ class Tracker:
         ball = self._update_ball([d for d in detections if d.class_id == 3 and d.confidence >= self.config.ball_confidence], w, h)
         if ball is not None:
             result.append(ball)
-        output = FrameTracks(self.frame_index, self.segment, bool(cut), tuple(result), tuple(self.trajectory))
+        output = FrameTracks(self.frame_index, self.segment, bool(cut), tuple(result), tuple(self.trajectory),
+                             self.ball_observation_ambiguous)
         self.frame_index += 1
         return output
 
@@ -135,18 +137,21 @@ class Tracker:
             x1, y1, x2, y2 = d.xyxy
             return np.array([(x1+x2)/2, (y1+y2)/2])
         chosen = None
+        self.ball_observation_ambiguous = False
         if self.ball is not None and self.gap >= max(1, round(self.config.ball_gap_seconds * self.fps)):
             self.ball = None
             self.velocity = np.zeros(2)
             self.gap = 0
             self.trajectory = []
         if self.ball is None:
+            self.ball_observation_ambiguous = len(candidates) > 1
             chosen = max(candidates, key=lambda d: d.confidence, default=None)
         else:
             predicted = self.ball[:2] + self.velocity
             gate = self.config.ball_gate_fraction * math.hypot(width, height) * (1 + 0.25 * self.gap)
             viable = [(d, float(np.linalg.norm(center(d) - predicted))) for d in candidates]
             viable = [(d, distance) for d, distance in viable if distance <= gate]
+            self.ball_observation_ambiguous = len(viable) > 1
             if viable:
                 chosen = min(viable, key=lambda item: item[1] / gate + (1 - item[0].confidence))[0]
         if chosen is not None:
