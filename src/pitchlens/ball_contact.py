@@ -26,6 +26,7 @@ class Contact:
     key: TrackKey
     team: TeamId | None
     distance: float
+    relative_offset: Point = (0., 0.)
 
     def identity(self) -> dict:
         segment, class_id, track_id = self.key
@@ -49,7 +50,7 @@ def observed_ball(tracks: Sequence[dict], ambiguous_ball: bool) -> tuple[Point |
 
 
 def nearest_contact(segment: int, tracks: Sequence[dict], ball: Point, team_ids: Collection[TeamId],
-                    max_distance: float, min_margin: float) -> tuple[Contact | None, str | None]:
+                    max_distance: float, min_margin: float, *, lower_region: bool = False) -> tuple[Contact | None, str | None]:
     ball_x, ball_y = ball
     nearby = []
     for item in tracks:
@@ -61,11 +62,20 @@ def nearest_contact(segment: int, tracks: Sequence[dict], ball: Point, team_ids:
         if bounds is None:
             continue
         x1, y1, x2, y2 = bounds
-        distance = math.hypot(ball_x - (x1 + x2) / 2, ball_y - y2) / (y2 - y1)
+        height = y2 - y1
+        relative = (0., 0.)
+        if lower_region:
+            horizontal_scale = max(height, 2 * (x2 - x1))
+            dx = max(x1 - ball_x, ball_x - x2, 0.) / horizontal_scale
+            dy = max(y2 - .20 * height - ball_y, ball_y - y2, 0.) / height
+            distance = math.hypot(dx, dy)
+            relative = ((ball_x - (x1 + x2) / 2) / horizontal_scale, (ball_y - y2) / height)
+        else:
+            distance = math.hypot(ball_x - (x1 + x2) / 2, ball_y - y2) / height
         if distance <= max_distance:
             team = item.get('team')
             team = team if type(team) in (int, str) and team in team_ids else None
-            nearby.append(Contact((segment, class_id, track_id), team, distance))
+            nearby.append(Contact((segment, class_id, track_id), team, distance, relative))
     if not nearby:
         return None, 'no_nearby_player'
     nearby.sort(key=lambda item: item.distance)

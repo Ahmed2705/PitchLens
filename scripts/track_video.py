@@ -23,14 +23,16 @@ from pitchlens.team_classification import TeamClassifier, TeamConfig
 def draw_possession(frame: np.ndarray, result: dict):
     owner = result['owner']
     label = 'Possession unknown'
+    team_names = {1: 'A', 2: 'B'}
     if owner is not None:
-        team = f"Team {owner['team']}" if owner['team'] is not None else 'Team unknown'
-        label = f"{CLASS_NAMES[owner['class_id']].capitalize()} {owner['track_id']} has ball | {team}"
+        team = team_names.get(owner['team'], owner['team'])
+        label = f"Likely owner {CLASS_NAMES[owner['class_id']]} {owner['track_id']} | Team {team if team is not None else 'unknown'}"
     totals = result['totals']
     coverage = totals['team_possession_coverage_pct']
-    detail = f'Team coverage {coverage:.1f}%' if coverage is not None else 'Team coverage unavailable'
+    detail = f'Known-team coverage {coverage:.1f}%' if coverage is not None else 'Team coverage unavailable'
     if totals['known_team_duration_seconds']:
-        shares = ' / '.join(f"T{team['team']} {team['possession_pct']:.0f}%" for team in totals['teams'])
+        shares = ' / '.join(f"Team {team_names.get(team['team'], team['team'])} {team['possession_pct']:.0f}%"
+                            for team in totals['teams'])
         detail = f'{shares} | {detail}'
     height, width = frame.shape[:2]
     for line, y in ((label, height - 30), (detail, height - 10)):

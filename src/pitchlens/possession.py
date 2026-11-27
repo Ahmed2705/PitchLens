@@ -4,24 +4,29 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 import math
 
-from pitchlens.ball_contact import Contact, TeamId, TrackKey, nearest_contact, observed_ball
+from pitchlens.ball_contact import Contact, Point, TeamId, TrackKey, nearest_contact, observed_ball
 from pitchlens.video_timing import FrameClock, is_finite_number
 
 
 @dataclass(frozen=True)
 class PossessionConfig:
-    max_normalized_distance: float = 0.5
+    max_normalized_distance: float = 0.30
     min_distance_margin: float = 0.1
     confirmation_seconds: float = 0.1
+    hysteresis_seconds: float = 0.12
+    max_relative_speed: float = 1.5
+    max_observation_gap_seconds: float = 0.25
 
     def __post_init__(self):
-        for name in ('max_normalized_distance', 'confirmation_seconds'):
+        for name in ('max_normalized_distance', 'confirmation_seconds', 'max_relative_speed', 'max_observation_gap_seconds'):
             value = getattr(self, name)
             if not is_finite_number(value) or value <= 0:
                 raise ValueError(f'{name} must be positive and finite')
         margin = self.min_distance_margin
         if not is_finite_number(margin) or not 0 <= margin <= self.max_normalized_distance:
             raise ValueError('min_distance_margin must be between zero and max_normalized_distance')
+        if not is_finite_number(self.hysteresis_seconds) or self.hysteresis_seconds < 0:
+            raise ValueError('hysteresis_seconds must be nonnegative and finite')
 
 
 @dataclass
@@ -46,8 +51,11 @@ class PossessionAnalytics:
         self._tracks: dict[TrackKey, _TrackPossession] = {}
         self._segment: int | None = None
         self._candidate: Contact | None = None
+        self._support_origin: Point | None = None
         self._consistent_seconds = 0.
-        self._confirmed = False
+        self._confirmed: Contact | None = None
+        self._held: TrackKey | None = None
+        self._unsupported_seconds = 0.
         self._analyzed_seconds = 0.
         self._player_seconds = 0.
 
@@ -57,53 +65,80 @@ class PossessionAnalytics:
             elapsed, source, valid_clock = None, None, False
         else:
             elapsed, source, valid_clock = self._clock.step(frame_index, timestamp_seconds)
-        continuous = not camera_cut and segment == self._segment and elapsed is not None
-        previous = self._candidate if continuous and self._confirmed else None
+        config = self.config
+        continuous = (not camera_cut and segment == self._segment and elapsed is not None
+                      and elapsed <= config.max_observation_gap_seconds + 1e-9)
+        previous = self._confirmed if continuous else None
+        if not continuous:
+            self._held = None
+            self._unsupported_seconds = 0.
         ball, ball_status, reason = observed_ball(tracks, ambiguous_ball)
         candidate = None
         if ball is not None:
             candidate, reason = nearest_contact(segment, tracks, ball, self._teams,
-                                                self.config.max_normalized_distance, self.config.min_distance_margin)
+                                                config.max_normalized_distance, config.min_distance_margin,
+                                                lower_region=True)
         if not valid_clock:
             candidate, reason = None, 'invalid_timing'
 
-        if (continuous and candidate is not None and self._candidate is not None
-                and candidate.key == self._candidate.key):
-            self._consistent_seconds += elapsed
+        moving = False
+        if continuous and candidate is not None and self._candidate is not None and candidate.key == self._candidate.key:
+            # Measure movement relative to the person, so a shared pan cancels out.
+            # Keep a small normalized slack for detector and box jitter.
+            duration = self._consistent_seconds + elapsed
+            offset = candidate.relative_offset
+            moving = math.dist(offset, self._candidate.relative_offset) > config.max_relative_speed * elapsed + .025
+            if previous is None and self._support_origin is not None:
+                moving |= math.dist(offset, self._support_origin) > config.max_relative_speed * duration + .025
+            self._consistent_seconds = 0. if moving else duration
         else:
             self._consistent_seconds = 0.
+        if not self._consistent_seconds:
+            self._support_origin = candidate.relative_offset if candidate is not None else None
         self._segment = segment
         self._candidate = candidate
-        threshold = self.config.confirmation_seconds
-        self._confirmed = candidate is not None and (
-            self._consistent_seconds >= threshold or math.isclose(self._consistent_seconds, threshold, rel_tol=1e-9)
-        )
+        # A hold never supplies evidence or time credit. It only lets the same
+        # owner resume on a fresh observed contact after a brief interruption.
+        if continuous and self._held is not None:
+            self._unsupported_seconds += elapsed
+            if previous is None and self._unsupported_seconds > config.hysteresis_seconds + 1e-9:
+                self._held = None
+        supported = candidate if not moving else None
+        if moving:
+            reason = 'relative_ball_travel'
+        held = self._held
+        self._confirmed = None
+        if supported is not None and (supported.key == held or
+                                      self._consistent_seconds >= config.confirmation_seconds - 1e-9):
+            self._confirmed = supported
+            self._held = supported.key
+            self._unsupported_seconds = 0.
 
         credited_seconds, credited_team = 0., None
         if elapsed is not None:
             self._analyzed_seconds += elapsed
-        if self._confirmed:
-            track = self._tracks.get(candidate.key)
+        if self._confirmed is not None:
+            track = self._tracks.get(supported.key)
             if track is None:
-                track = self._tracks[candidate.key] = _TrackPossession()
-            if candidate.team is not None:
-                track.known_teams.add(candidate.team)
-            if previous is None or previous.key != candidate.key:
+                track = self._tracks[supported.key] = _TrackPossession()
+            if supported.team is not None:
+                track.known_teams.add(supported.team)
+            if held != supported.key:
                 track.episodes += 1
-            else:
+            if previous is not None and previous.key == supported.key:
                 # Credit only intervals with the same confirmed owner at both ends.
                 credited_seconds = elapsed
                 track.duration_seconds += elapsed
                 self._player_seconds += elapsed
-                if candidate.team is not None and previous.team == candidate.team:
-                    credited_team = candidate.team
+                if supported.team is not None and previous.team == supported.team:
+                    credited_team = supported.team
                     self._teams[credited_team] += elapsed
 
-        state = 'confirmed' if self._confirmed else 'pending' if candidate is not None else 'unknown'
+        state = 'confirmed' if self._confirmed is not None else 'pending' if supported is not None else 'unknown'
         return {
             'state': state, 'reason': 'confirmation_pending' if state == 'pending' else reason,
-            'owner': candidate.identity() if self._confirmed else None,
-            'pending_candidate': candidate.identity() if state == 'pending' else None,
+            'owner': self._confirmed.identity() if self._confirmed is not None else None,
+            'pending_candidate': supported.identity() if state == 'pending' else None,
             'normalized_distance': candidate.distance if candidate is not None else None,
             'ball_status': ball_status,
             'timing': {'elapsed_seconds': elapsed, 'source': source,
@@ -129,7 +164,7 @@ class PossessionAnalytics:
         }
 
     def summary(self) -> dict:
-        current = self._candidate.key if self._confirmed else None
+        current = self._confirmed.key if self._confirmed is not None else None
         tracks = []
         for (segment, class_id, track_id), track in sorted(self._tracks.items()):
             team = next(iter(track.known_teams)) if len(track.known_teams) == 1 else None

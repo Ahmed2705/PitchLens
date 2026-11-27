@@ -6,9 +6,11 @@ Possession runs in the existing tracking runner, including when pitch calibratio
 
 The tracker keeps its existing ball selector. An observed ball can provide evidence when it was the only viable detection after the tracker's confidence and position gates. Multiple viable ball detections are treated as ambiguous for possession, including on initialization when there is no predicted position to gate against. Missing, predicted and invalid ball boxes provide no evidence.
 
-For each observed player or goalkeeper with a positive track ID, use the bottom centre of the box as ground contact. Divide the Euclidean distance from the ball box centre to that point by the player's box height. Exclude referees and invalid boxes. Choose the nearest in-range candidate if the difference from any in-range runner-up meets the configured margin. A tie remains ambiguous. The margin applies even when both players have the same team label. An unknown team can still have an individually confirmed owner.
+For each observed player or goalkeeper with a positive track ID, measure the distance from the observed ball centre to the full-width lower 20% of the person box. The distance is zero inside that region. Outside, scale the vertical gap by box height and the horizontal gap by the greater of box height and twice box width. This makes comparable contacts less sensitive to image scale. Referees and invalid boxes are excluded. The nearest in-range candidate must clear the margin from the next in-range player, even when both players have the same team label. A goalkeeper with an unknown team can earn individual possession time.
 
-An in-range, unambiguous candidate starts as pending and needs consecutive supporting observations for the configured time. Only then does the state become confirmed. Losing support clears that confirmation immediately. Another player, a cut, a timing gap, missing observations, or ambiguous evidence requires a fresh confirmation. Track identity is scoped by camera shot, class and track ID.
+An in-range, unambiguous candidate starts as pending. Consecutive observations compare the ball's normalized offset from the player's lower centre. Motion shared by the player and ball cancels out of that offset. Relative travel above the configured rate resets the confirmation timer. Pending confirmation also checks displacement from the first supporting sample, limiting the effect of per-frame jitter slack on a ball gradually traveling through the region.
+
+A confirmed owner becomes unknown or pending as soon as current evidence is lost, contested, or indicates travel. Brief interruptions retain the previous identity internally and let that same player resume on a fresh, eligible observation within the hysteresis window. Missing or predicted balls cannot confirm a new owner, and the gap and first recovered interval earn no credit. Sustained separation or travel expires the hold, and a new owner requires its own confirmation. Camera cuts reset pending evidence, motion history and the hold. Track identity is scoped by camera shot, class and track ID. The pass detector retains its existing contact and travel rules and can still use a confirmed owner as corroboration.
 
 ## Configuration
 
@@ -16,9 +18,12 @@ Run `scripts.track_video` as usual. Optionally pass `--possession-config PATH` w
 
 | Field | Default | Meaning |
 | --- | ---: | --- |
-| `max_normalized_distance` | 0.5 | Maximum ball-to-contact distance in player box heights. |
+| `max_normalized_distance` | 0.30 | Maximum normalized distance outside the lower box region. |
 | `min_distance_margin` | 0.1 | Minimum separation from the next in-range candidate, in normalized distance units. |
 | `confirmation_seconds` | 0.1 | Required continuous support for the same candidate, in source video seconds. |
+| `hysteresis_seconds` | 0.12 | Maximum time since the last supported observation for the same owner to resume. Set to zero to disable the hold. |
+| `max_relative_speed` | 1.5 | Maximum normalized player-relative movement per second, plus 0.025 normalized units per check for measurement jitter. |
+| `max_observation_gap_seconds` | 0.25 | Largest adjacent source time step allowed to carry evidence. A larger valid gap contributes only unknown time. |
 
 These are provisional engineering defaults. They were not fitted to these clips.
 
@@ -31,6 +36,7 @@ Each valid interval is counted once. Player duration is credited only when the s
 - Team possession percentage divides each team's duration by the total known-team duration. Shares are null when that denominator is zero.
 - Team possession coverage divides known-team duration by total analyzed duration. Player possession coverage uses confirmed player duration over the same denominator. Both coverages are null when no interval has been analyzed.
 - Unknown team duration is analyzed duration minus known-team duration. It includes unknown player possession and player-confirmed time with unknown team.
+- Unknown player duration includes missing, contested, traveling-ball and pending intervals. The overlay displays the likely current owner, Team A and Team B shares when available, and known-team coverage.
 
 ## Structured output
 
@@ -38,7 +44,25 @@ Each JSONL record adds `possession` with `state` (`confirmed`, `pending` or `unk
 
 The final summary adds possession settings, analysis time per frame, the final duration totals and a track list with durations, episode counts and final status. A track's summary team is null if no confirmed frame had a known label or if known labels disagreed. Track IDs cannot establish that the same individual appears in a different shot.
 
-## Verification
+## Possession upgrade verification
+
+All 213 automated tests passed, including tests for controlled motion, a ball traveling past a player, transfers, brief tracking interruptions, predicted positions, ambiguity, cuts and interval accounting. The CUDA smoke test processed and decoded all 762 frames of `passes2.mp4` at 7.70 processing FPS. Tracking and team records matched the previous integration on every frame. The interval audit reconciled all totals and found no possession credit on predicted ball positions or across unsupported intervals.
+
+| Measurement | `passes2.mp4` |
+| --- | ---: |
+| Analyzed duration | 12.684 s |
+| Confirmed player possession | 2.667 s (21.03%) |
+| Unknown or contested player possession | 10.017 s |
+| Known-team possession | 2.618 s (20.64% coverage) |
+| Unknown team possession | 10.066 s |
+| Team A share of known-team time | 0.00% (0.000 s) |
+| Team B share of known-team time | 100.00% (2.618 s) |
+
+Manual review inspected three-frame strips around eight selected moments. All five sampled confirmed owners looked consistent with visible control, zero sampled assignments looked incorrect, and three moments had unknown possession. The unknown examples covered a traveling ball, an overlap where the red player appeared to retain control, and a kick with only a predicted ball position. This small sample cannot establish clip-wide accuracy.
+
+The annotated MP4, JSONL, summary, interval verification and manual review are in `E:\PitchLensStorage\outputs\possession-integration-v1`.
+
+## Initial baseline verification
 
 All 163 automated tests passed. The 10-second synthetic example, including confirmation and transition gaps, credited 6.00 s to Team A, 2.00 s to Team B and 2.00 s to unknown possession. The corresponding known-team shares were 75% and 25%, at 80% known-team coverage. Synthetic tests also cover goalkeepers, same-team and opposing-team ambiguity, invalid boxes and timing, and owner resets across cuts.
 
@@ -57,7 +81,7 @@ Local verification outputs and representative overlays are under `outputs/featur
 
 ## Limitations
 
-Proximity-based possession is an estimate of likely ownership and is not equivalent to verified physical ball control. Ball flight can appear close to an unrelated player's feet in the image, and a moving ball can remain nearby long enough to pass confirmation. Camera angle, foreshortening, occlusion and false ball detections can affect the estimate. Team percentages inherit classifier errors and missing labels. Automatic team identities come from shot-local clusters, so aggregated shares by label can mix sides if the label order changes after a cut. There is no independent possession ground truth for either clip.
+Image-space possession estimates likely ownership. Ball flight can project near an unrelated player's lower box, and slow relative travel or shared movement can pass confirmation. Zoom, parallax, occlusion, false ball detections and track fragmentation can affect the estimate. Team percentages inherit classifier errors and missing labels. The default SigLIP classifier fixes the two team identities for the clip, while the color fallback can change labels after cuts. Verified physical control requires independent possession annotations.
 
 ## Passing-clip review
 

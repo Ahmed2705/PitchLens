@@ -5,9 +5,9 @@ import unittest
 from pitchlens.possession import PossessionAnalytics, PossessionConfig
 
 
-def person(x=50., *, height=40., track_id=1, class_id=0, team='A', observed=True):
+def person(x=50., *, height=40., width=10., track_id=1, class_id=0, team='A', observed=True):
     return {'class_id': class_id, 'track_id': track_id, 'team': team, 'observed': observed,
-            'xyxy': [x - 5, 70. - height, x + 5, 70.]}
+            'xyxy': [x - width / 2, 70. - height, x + width / 2, 70.]}
 
 
 def ball(x=50., y=70., *, observed=True):
@@ -28,7 +28,7 @@ class PossessionTests(unittest.TestCase):
         self.assertEqual(start['state'], 'pending')
         self.assertIsNone(start['owner'])
         self.assertEqual(start['pending_candidate']['track_id'], 1)
-        self.assertEqual(start['normalized_distance'], .25)
+        self.assertEqual(start['normalized_distance'], .025)
         self.assertEqual(confirmed['state'], 'confirmed')
         self.assertEqual(confirmed['owner'], {'segment': 0, 'class_id': 0, 'track_id': 1, 'team': 'A'})
         self.assertEqual(confirmed['timing']['credited_player_seconds'], 0.)
@@ -37,25 +37,81 @@ class PossessionTests(unittest.TestCase):
         self.assertNotIn('pitch', tracks[0])
 
     def test_selects_by_normalized_distance_and_preserves_image_scale(self):
-        # First player is closer in pixels, second is closer in box heights.
-        original = [person(54., height=10.), person(58., height=40., track_id=2), ball()]
+        # First region is closer in pixels, second is closer after normalization.
+        original = [person(54., height=8., width=4.), person(59., height=40., track_id=2), ball()]
         for scale in (1., 2.5):
             with self.subTest(scale=scale):
                 self.analytics = PossessionAnalytics(10, ('A', 'B'))
                 scaled = [{**item, 'xyxy': [value * scale for value in item['xyxy']]} for item in original]
                 result = self.update(0, scaled)
                 self.assertEqual(result['pending_candidate']['track_id'], 2)
-                self.assertAlmostEqual(result['normalized_distance'], .2)
+                self.assertAlmostEqual(result['normalized_distance'], .1)
 
     def test_threshold_and_margin_only_among_nearby_candidates(self):
-        result = self.update(0, [person(29.), person(71., track_id=2), ball()])
+        result = self.update(0, [person(32.), person(68., track_id=2), ball()])
         self.assertEqual(result['reason'], 'no_nearby_player')
-        result = self.update(1, [person(30.), person(71., track_id=2), ball()])
+        result = self.update(1, [person(33.), person(68., track_id=2), ball()])
         self.assertEqual(result['state'], 'pending')
-        self.assertEqual(result['normalized_distance'], .5)
+        self.assertEqual(result['normalized_distance'], .3)
         # A margin of exactly 0.1 is sufficient.
-        result = self.update(2, [person(42.), person(62., track_id=2), ball()])
+        tracks = [person(41.), person(63., track_id=2), ball()]
+        self.analytics = PossessionAnalytics(10, ('A', 'B'))
+        self.update(0, tracks)
+        result = self.update(1, tracks)
         self.assertEqual(result['owner']['track_id'], 1)
+
+    def test_relative_motion_rejects_a_ball_traveling_through_the_lower_region(self):
+        self.analytics = PossessionAnalytics(20, ('A', 'B'))
+        results = [self.update(i, [person(), ball(x)]) for i, x in enumerate((35., 40., 45., 50., 55., 60., 65.))]
+        self.assertEqual(results[0]['state'], 'pending')
+        self.assertTrue(all(result['reason'] == 'relative_ball_travel' for result in results[1:]))
+        self.assertTrue(all(result['owner'] is None for result in results))
+        self.assertEqual(self.analytics.summary()['confirmed_player_duration_seconds'], 0.)
+
+    def test_shared_image_motion_preserves_control(self):
+        self.analytics = PossessionAnalytics(20, ('A', 'B'))
+        for i in range(4):
+            x = 50. + 12 * i
+            result = self.update(i, [person(x), ball(x + 4., 67.)])
+        self.assertEqual(result['owner']['track_id'], 1)
+        self.assertEqual(result['totals']['known_team_duration_seconds'], .05)
+
+    def test_short_tracking_interruptions_restore_owner_without_time_credit(self):
+        for missing in ([person()], [person(), ball(observed=False)], [ball()]):
+            with self.subTest(missing=missing):
+                self.analytics = PossessionAnalytics(20, ('A', 'B'))
+                tracks = [person(), ball()]
+                for i in range(4):
+                    self.update(i, tracks)
+                interrupted = self.update(4, missing)
+                self.assertIsNone(interrupted['owner'])
+                resumed = self.update(5, tracks)
+                self.assertEqual(resumed['owner']['track_id'], 1)
+                self.assertEqual(resumed['timing']['credited_player_seconds'], 0.)
+                self.assertEqual(self.update(6, tracks)['timing']['credited_player_seconds'], .05)
+                self.assertEqual(self.analytics.summary()['episodes'], 1)
+
+    def test_predicted_ball_cannot_establish_owner_and_sustained_separation_expires_hold(self):
+        self.analytics = PossessionAnalytics(20, ('A', 'B'))
+        for i in range(4):
+            self.assertIsNone(self.update(i, [person(), ball(observed=False)])['owner'])
+        close = [person(), ball()]
+        for i in range(4, 7):
+            result = self.update(i, close)
+        self.assertEqual(result['state'], 'confirmed')
+        for i in range(7, 10):
+            self.assertIsNone(self.update(i, [person(), ball(85.)])['owner'])
+        self.assertEqual(self.update(10, close)['state'], 'pending')
+
+    def test_contest_suspends_public_owner_and_blocks_credit(self):
+        self.analytics = PossessionAnalytics(20, ('A', 'B'))
+        tracks = [person(), ball()]
+        for i in range(4):
+            self.update(i, tracks)
+        result = self.update(4, [*tracks, person(track_id=2, team='B')])
+        self.assertEqual(result['reason'], 'ambiguous_owner')
+        self.assertIsNone(result['owner'])
+        self.assertEqual(result['timing']['credited_player_seconds'], 0.)
 
     def test_contested_ball_is_unknown_for_same_and_different_teams(self):
         for team in ('A', 'B'):
@@ -77,7 +133,7 @@ class PossessionTests(unittest.TestCase):
         self.assertEqual(self.analytics.summary()['tracks'][0]['class_id'], 1)
 
     def test_unknown_team_preserves_player_credit(self):
-        tracks = [person(team=None), ball()]
+        tracks = [person(class_id=1, team=None), ball()]
         for frame in range(3):
             result = self.update(frame, tracks)
         self.assertIsNone(result['owner']['team'])
@@ -224,7 +280,9 @@ class PossessionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 PossessionAnalytics(fps, ('A', 'B'))
         for overrides in ({'max_normalized_distance': 0.}, {'min_distance_margin': -.1},
-                          {'min_distance_margin': .6}, {'confirmation_seconds': math.nan}):
+                          {'min_distance_margin': .6}, {'confirmation_seconds': math.nan},
+                          {'hysteresis_seconds': -.1}, {'max_relative_speed': True},
+                          {'max_observation_gap_seconds': 0.}):
             with self.assertRaises(ValueError):
                 PossessionConfig(**overrides)
         for index, timestamp in enumerate((-1., math.nan, math.inf)):

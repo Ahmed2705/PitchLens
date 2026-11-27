@@ -2,6 +2,11 @@
 
 PitchLens has an approved dual-model detection default and a verified local tracking integration. Ground-truth tracking evaluation remains outstanding.
 
+## Ball possession improvement
+
+- Possession uses the player's normalized lower box and consecutive player-relative ball movement. A brief hold lets the same owner resume after a supported observation returns. Ambiguous, missing or predicted evidence remains unknown and earns no time. Pass detection retains its contact geometry.
+- All 213 tests passed. The `passes2.mp4` smoke test exported all 762 frames with unchanged tracking and team records. Player possession was confirmed for 2.667 s, and known-team coverage was 20.64%. In eight visually reviewed situations, five likely owners were correct, zero were incorrect and three were unknown. [Algorithm, statistics and evidence](POSSESSION.md#possession-upgrade-verification)
+
 ## Automatic team classification upgrade
 
 - Automatic team classification now fits SigLIP embeddings with UMAP and two-cluster K-means. Track assignments use fixed clip-wide Team A and Team B identities and allow unknowns. The LAB classifier remains available through `--team-mode color`. [Model and usage](TRACKING.md#automatic-team-classification)
